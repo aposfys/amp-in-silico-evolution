@@ -61,12 +61,25 @@ def extract_lineage(log):
         pbar.update(i)
     pbar.close()
     lineage = lineage.sort_index()
-    ltail = lineage.tail(1)
-    print(f"""
-{ltail[["gndx","seq_len","ptm","mean_plddt","num_conts","iplddt", "num_inter_conts","score"]].iloc[-1]}
-{ltail.sequence.iloc[-1]}
-{ltail.ss.iloc[-1]}
-""")
+    r = lineage.tail(1).iloc[-1]
+    W = 60
+    print(f"\n  {'─'*W}")
+    print(f"  Best sequence in lineage  (gen {r.gndx})")
+    print(f"  {'─'*W}")
+    print(f"  Score:    {float(r.score):.4f}   │  Length: {int(r.seq_len)}")
+    print(f"  pLDDT:    {float(r.mean_plddt):.4f}   │  pTM:    {float(r.ptm):.4f}")
+    if float(r.num_inter_conts) > 1:
+        print(f"  iPLDDT:   {float(r.iplddt):.4f}   │  InterConts: {int(r.num_inter_conts)}")
+    if 's_amp' in lineage.columns:
+        print(f"  s_amp:    {float(r.s_amp):.4f}")
+    print(f"  Contacts: {int(r.num_conts)}")
+    seq = str(r.sequence)
+    ss  = str(r.ss)
+    print(f"  {'─'*W}")
+    for i in range(0, max(len(seq), len(ss)), 60):
+        print(f"  seq  {seq[i:i+60]}")
+        print(f"  ss   {ss[i:i+60]}")
+    print(f"  {'─'*W}\n")
     return lineage
 
 def extract_sequences(log):
@@ -258,18 +271,17 @@ def backbone_traj(trajlog, pdbdir):
     if os.path.isdir(trajpdb) and len(os.listdir(trajpdb)) != pfeslen:
         shutil.rmtree(trajpdb)
         os.makedirs(trajpdb, exist_ok=True)
-        print(f'{pfeslen} unique sequences with the best folds are selected') 
+        print(f"  Copying {pfeslen} unique best-fold structures...")
         for gndx, pdbid in tqdm(zip(trajlog.gndx, trajlog.id), total=len(trajlog)):
             try:
                 shutil.copy(pdbdir +'/' + pdbid +'.pdb.gz', trajpdb +'/'+ gndx + '.pdb.gz')
             except FileNotFoundError:
                 print(pdbid +'.pdb.gz is missing' )
                 pass
-    else: 
-        print(f'The best folds from {pfeslen} generations are selected')
+    else:
+        print(f"  {pfeslen} best-fold structures already present, skipping copy")
 
-    #if single_chian:
-    print("extracting backbone coordinates...")
+    print("  Extracting backbone coordinates...")
     i=0
     PDB_A, PDB_B, lastBB_A, lastBB_B = [], [], [], []
     for pdb in tqdm(sorted_alphanumeric(os.listdir(trajpdb))):
@@ -308,7 +320,7 @@ def backbone_traj(trajlog, pdbdir):
             toppdb = ''.join(pdbA + pdbB)
             break
     
-    print('preparing backbone trajectory...')
+    print("  Preparing backbone trajectory...")
     with open(outdir+'/.tmp.pdb', 'w') as f:
         i=1
         f.write(f'MODEL        {i}\n' + toppdb + 'TER\nENDMDL\n')
@@ -322,7 +334,7 @@ def backbone_traj(trajlog, pdbdir):
         import MDAnalysis as mda
         from MDAnalysis.analysis import align
 
-        print('writing aligned backbone trajectory...')
+        print("  Writing aligned backbone trajectory...")
         traj = mda.Universe(outdir+'/.tmp.pdb')
         top = traj.select_atoms('protein')
 
@@ -340,7 +352,7 @@ def backbone_traj(trajlog, pdbdir):
 
         os.remove(outdir+'/.tmp.pdb')
     except:
-        print('Warning: MDAnalysis package is not available, writing unaligned trajectory')
+        print("  Warning: MDAnalysis not available — writing unaligned trajectory")
         shutil.copy(outdir+'/.tmp.pdb', trajpath)
 
 
@@ -364,24 +376,32 @@ bestlog = log.groupby('gndx').head(1)
 bestlog.to_csv(os.path.join(outdir, 'bestlog.tsv'), sep='\t', index=False, header=True)
 
 
-print('==================================')
+W = 60
+print(f"\n  {'═'*W}")
+print(f"  Extracting lineage...")
+print(f"  {'─'*W}")
 lineage = extract_lineage(log)
 lineage.to_csv(os.path.join(outdir, 'lineage.tsv'), sep='\t', index=False, header=True)
-
-
+print(f"  Lineage length: {len(lineage)}  │  saved → {os.path.join(outdir, 'lineage.tsv')}")
 
 if args.noplots:
-    print('making plots')
+    print(f"\n  {'─'*W}")
+    print(f"  Generating plots → {plotdir}")
+    print(f"  {'─'*W}")
     make_plots(log, bestlog, lineage)
-
-    print('making summary plot')
+    print(f"  ✓ individual column plots")
     make_summary_plot(log, bestlog, lineage)
-
-    print('making secondary structure plot')
+    print(f"  ✓ summary plot")
     make_ss_plot(lineage)
+    print(f"  ✓ secondary structure plot")
 
 if args.notraj:
-    print('making backbone trajectory')
+    print(f"\n  {'─'*W}")
+    print(f"  Building backbone trajectory → {trajpath}")
+    print(f"  {'─'*W}")
     backbone_traj(lineage, pdbdir)
+    print(f"  ✓ trajectory written")
 
-print('=================================='"\n")
+print(f"\n  {'═'*W}")
+print(f"  Done.  Results in: {outdir}")
+print(f"  {'═'*W}\n")
