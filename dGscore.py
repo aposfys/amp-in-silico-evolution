@@ -8,8 +8,15 @@ import esm
 
 from esm.inverse_folding.util import CoordBatchConverter
 
+if torch.cuda.is_available():
+    _device = torch.device("cuda")
+elif torch.backends.mps.is_available():
+    _device = torch.device("mps")
+else:
+    _device = torch.device("cpu")
+
 model_if, alphabet = esm.pretrained.esm_if1_gvp4_t16_142M_UR50()
-model_if.eval().cuda().requires_grad_(False)
+model_if.eval().to(_device).requires_grad_(False)
 
 def dGscore(coord:np.array, sequence:str):
 

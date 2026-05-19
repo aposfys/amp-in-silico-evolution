@@ -110,14 +110,14 @@ class Evolver():
         
         try:
             if evoldict == 'flatoptim':
-                self.evoldict = Evolver.evoldicts[evoldict]
+                self.evoldict = dict(Evolver.evoldicts[evoldict])
             else:
-                self.evoldict = Evolver.evoldicts[evoldict]
-                self.evoldict.update(self.non_point_mutations) # add non point mutations 
-        except: 
-            print(f'WARNING! Unknown evoldict "{evoldict}", "codonrates" will be used. \nAvailable evoldicts are {list(Evolver.evoldicts.keys())}. \nSee github for details' )
-            self.evoldict = Evolver.evoldicts["codonrates"]
-            pass
+                self.evoldict = dict(Evolver.evoldicts[evoldict])
+                self.evoldict.update(self.non_point_mutations)
+        except KeyError:
+            print(f'WARNING! Unknown evoldict "{evoldict}", "codonrates" will be used. \nAvailable evoldicts are {list(Evolver.evoldicts.keys())}. \nSee github for details')
+            self.evoldict = dict(Evolver.evoldicts["codonrates"])
+            self.evoldict.update(self.non_point_mutations)
         self.evoldict_normal = {j:round(i/sum(self.evoldict.values()),4) for i, j in zip(self.evoldict.values(), self.evoldict.keys())}
         self.mutation_types = list(self.evoldict.keys())  #mutation type
         self.p = list(self.evoldict.values()) #probability for each mutation
@@ -223,14 +223,17 @@ class Evolver():
         if selection_mode == "strong":
             new_init_gen = mixed_pop.sort_values('score', ascending=False).head(pop_size)
 
-        if selection_mode == "weak":
+        elif selection_mode == "weak":
             weights = np.array(e**(beta * mixed_pop.score) / np.array(e**(beta * mixed_pop.score)).sum())
             new_init_gen = mixed_pop.sample(n=pop_size, weights=weights, replace=(not norepeat)).sort_values('score', ascending=False)
-        
-        if selection_mode == "weak2":
+
+        elif selection_mode == "weak2":
             weights = np.array((mixed_pop.score) / ((mixed_pop.score).sum()))
             new_init_gen = mixed_pop.sample(n=pop_size, weights=weights, replace=(not norepeat)).sort_values('score', ascending=False)
             print(weights.sum())
+
+        else:
+            raise ValueError(f'Unknown selection_mode "{selection_mode}". Valid options: strong, weak, weak2')
 
         # try:
         #     print("\ninput_new_gen\n",input_new_gen[['id','prev_id','score', 'sequence']], 
