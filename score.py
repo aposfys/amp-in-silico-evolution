@@ -90,18 +90,29 @@ def get_nconts(pdb_txt, chain="A", distance_cutoff=6.0, plddt_cutoff=0):
     # Get all C-alpha atoms with specific pLDDT cutoff
     ca_data, plddt = [],[]
     for line in pdb_txt.splitlines():
-        atom_array = line.split()
-        if atom_array[0] == 'ATOM'and atom_array[4] == chain:
-            plddt.append(float(atom_array[10]))
-        if (atom_array[0] == 'ATOM' and atom_array[2] == 'CB' and float(atom_array[10]) > plddt_cutoff and atom_array[4] == chain) :
-            ca_data.append([
-            int(atom_array[5]), # residue index 
-            np.array(list(map(float, atom_array[6:9]))), #xyz
-            float(atom_array[10]) #pLDDT   
-            ])
+        if line.startswith('ATOM  ') or line.startswith('HETATM'):
+            chain_id = line[21]
+            atom_name = line[12:16].strip()
+            
+            if chain_id == chain:
+                try:
+                    b_factor = float(line[60:66].strip())
+                except:
+                    b_factor = 0.0
+                plddt.append(b_factor)
+                
+                if atom_name == 'CA' and b_factor > plddt_cutoff:
+                    try:
+                        res_seq = int(line[22:26].strip())
+                        x = float(line[30:38].strip())
+                        y = float(line[38:46].strip())
+                        z = float(line[46:54].strip())
+                        ca_data.append([res_seq, np.array([x, y, z]), b_factor])
+                    except ValueError:
+                        pass
     
     if len(ca_data) == 0:
-        mean_plddt = np.mean(np.array(plddt))
+        mean_plddt = np.mean(np.array(plddt)) if len(plddt) > 0 else 0.0
         return(1, round(mean_plddt * 0.01, 2))
     else:    
         coords = np.array([item[1] for item in ca_data])  # Extract coordinates
@@ -136,19 +147,27 @@ def get_inter_nconts(pdb_txt, chainA='A', chainB='B', distance_cutoff=6.0, plddt
     # Get all C-beta atoms with specific pLDDT cutoff
     cb_data_A, cb_data_B, = [], []
     for line in pdb_txt.splitlines():
-        atom_array = line.split()
-        if (atom_array[0] == 'ATOM' and atom_array[2] == 'CB' and float(atom_array[10]) > plddt_cutoff and atom_array[4] == chainA) :
-            cb_data_A.append([
-            int(atom_array[5]), # residue index 
-            np.array(list(map(float, atom_array[6:9]))), #xyz
-            float(atom_array[10]) #pLDDT   
-            ])
-        if (atom_array[0] == 'ATOM' and atom_array[2] == 'CB' and float(atom_array[10]) > plddt_cutoff and atom_array[4] == chainB) :
-            cb_data_B.append([
-            int(atom_array[5]), # residue index 
-            np.array(list(map(float, atom_array[6:9]))), #xyz
-            float(atom_array[10]) #pLDDT   
-            ])
+        if line.startswith('ATOM  ') or line.startswith('HETATM'):
+            chain_id = line[21]
+            atom_name = line[12:16].strip()
+            try:
+                b_factor = float(line[60:66].strip())
+            except:
+                b_factor = 0.0
+                
+            if atom_name == 'CA' and b_factor > plddt_cutoff:
+                try:
+                    res_seq = int(line[22:26].strip())
+                    x = float(line[30:38].strip())
+                    y = float(line[38:46].strip())
+                    z = float(line[46:54].strip())
+                    
+                    if chain_id == chainA:
+                        cb_data_A.append([res_seq, np.array([x, y, z]), b_factor])
+                    elif chain_id == chainB:
+                        cb_data_B.append([res_seq, np.array([x, y, z]), b_factor])
+                except ValueError:
+                    pass
 
     if len(cb_data_A) == 0 or len(cb_data_B) == 0: 
         return(1, 1)
@@ -178,18 +197,18 @@ def cbiplddt(pdb_txt, chainA='A', chainB='B', distance_cutoff=6.0, plddt_cutoff=
     # Get all C-beta atoms with specific pLDDT cutoff
     cbeta_atom = []
     for line in pdb_txt.splitlines():
-            if line[:4] == 'ATOM' and line[13:15] == "CB":
-                cbeta_atom.append(line)
+        if (line.startswith('ATOM  ') or line.startswith('HETATM')) and line[12:16].strip() == "CA":
+            cbeta_atom.append(line)
+            
     cbeta_array = [['X' for j in range(8)] for i in range(len(cbeta_atom))]
     for row in range(len(cbeta_atom)):
-        cbeta_array[row]
         cbeta_array[row][0] = row					#Index
         cbeta_array[row][1] = (cbeta_atom[row][22:26]).strip()	#Residue Number
         cbeta_array[row][2] = (cbeta_atom[row][30:38]).strip()	#xyz
         cbeta_array[row][3] = (cbeta_atom[row][38:46]).strip()	#xyz
         cbeta_array[row][4] = (cbeta_atom[row][46:54]).strip()	#xyz
-        cbeta_array[row][5] = (cbeta_atom[row][61:66]).strip()	#pLDDT 
-        cbeta_array[row][6] = (cbeta_atom[row][20:22]).strip()	#ChainID
+        cbeta_array[row][5] = (cbeta_atom[row][60:66]).strip()	#pLDDT 
+        cbeta_array[row][6] = (cbeta_atom[row][21:22]).strip()	#ChainID
         cbeta_array[row][7] = (cbeta_atom[row][17:20]).strip()	#Residue Name
 
     cb_data_A, cb_data_B, = [], []
@@ -231,14 +250,80 @@ def iplddt_all_atom(pdb_txt, chainA='A', chainB='B', distance_cutoff=6.0,):
 
 
 
-input_pdb_path = str(sys.argv[1])
+if __name__ == '__main__':
+    input_pdb_path = str(sys.argv[1])
 
-if  os.path.isfile(input_pdb_path): 
-    file = open(input_pdb_path,'r')
-    pdb_txt = file.read()
+    if os.path.isfile(input_pdb_path):
+        with open(input_pdb_path, 'r') as file:
+            pdb_txt = file.read()
+
+        print("inner contacts, plddt:" + str(get_nconts(pdb_txt, "A", 8.0, 0)))
+        print("inter contacts, iplddt:" + str(cbiplddt(pdb_txt, "A", "B", 8.0, 0)))
 
 
-    print("inner contancts, plddt:" + str(get_nconts(pdb_txt, "A", 6.0, 0)))
-    print("intra contancts, iplddt:" + str(cbiplddt(pdb_txt,"A","B", 6.0, 0)))
 
+# Eisenberg consensus hydrophobicity scale
+eisenberg_scale = {
+    'I': 0.73, 'F': 0.61, 'V': 0.54, 'L': 0.53, 'W': 0.37,
+    'M': 0.26, 'A': 0.25, 'G': 0.16, 'C': 0.04, 'Y': 0.02,
+    'P': -0.07, 'T': -0.18, 'S': -0.26, 'H': -0.40, 'E': -0.62,
+    'N': -0.64, 'Q': -0.69, 'D': -0.72, 'K': -1.10, 'R': -1.76
+}
 
+def calculate_samp(sequence):
+    seq_len = len(sequence)
+    if seq_len == 0:
+        return 1.0
+
+    # 1. Net Positive Charge Reward (S_charge)
+    # count(R,K) + 0.1*count(H) - count(D,E)
+    count_R = sequence.count('R')
+    count_K = sequence.count('K')
+    count_H = sequence.count('H')
+    count_D = sequence.count('D')
+    count_E = sequence.count('E')
+    
+    charge = count_R + count_K + 0.1 * count_H - (count_D + count_E)
+    s_charge = 1.0 / (1.0 + math.exp(-(charge - 2.0))) # sigmoid(charge - 2)
+
+    # 2. Hydrophobic Ratio Reward (S_hydro)
+    hydro_residues = {'A', 'V', 'I', 'L', 'M', 'F', 'W', 'P'}
+    count_hydro = sum(1 for res in sequence if res in hydro_residues)
+    ratio = count_hydro / seq_len
+    s_hydro = max(1.0 - abs(ratio - 0.50) * 4, 0.01)
+
+    # 3. Amphipathicity Reward (S_amphi)
+    # Window of N=11, angle delta=100 degrees
+    N = 11
+    delta = math.radians(100)
+    max_mu_H = 0.0
+    
+    if seq_len >= N:
+        for i in range(seq_len - N + 1):
+            window = sequence[i:i+N]
+            sum_sin = 0.0
+            sum_cos = 0.0
+            for j, res in enumerate(window):
+                h_i = eisenberg_scale.get(res, 0.0)
+                sum_sin += h_i * math.sin(j * delta)
+                sum_cos += h_i * math.cos(j * delta)
+            
+            mu_H = math.sqrt(sum_sin**2 + sum_cos**2) / N
+            if mu_H > max_mu_H:
+                max_mu_H = mu_H
+    else:
+        # For sequences shorter than 11, compute over the entire sequence
+        sum_sin = 0.0
+        sum_cos = 0.0
+        for j, res in enumerate(sequence):
+            h_i = eisenberg_scale.get(res, 0.0)
+            sum_sin += h_i * math.sin(j * delta)
+            sum_cos += h_i * math.cos(j * delta)
+        max_mu_H = math.sqrt(sum_sin**2 + sum_cos**2) / seq_len if seq_len > 0 else 0.0
+
+    s_amphi = math.tanh(max_mu_H * 5)
+    if s_amphi < 0:
+        s_amphi = 0.01 # Fallback to prevent negative score inside the power calculation
+
+    s_amp = (s_charge * s_hydro * s_amphi) ** (1/3)
+    return s_amp

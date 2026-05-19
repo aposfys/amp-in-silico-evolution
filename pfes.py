@@ -10,13 +10,30 @@ import gzip
 import time
 from datetime import datetime
 
+os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 import torch
 import esm
 
+# Monkeypatch ESM3 fp32_autocast_context to support MPS
+from contextlib import nullcontext
+try:
+    from esm.utils import misc
+    original_fp32_autocast_context = misc.fp32_autocast_context
+    def mps_compatible_fp32_autocast_context(device_type: str):
+        if device_type == "mps":
+            return nullcontext()
+        return original_fp32_autocast_context(device_type)
+    misc.fp32_autocast_context = mps_compatible_fp32_autocast_context
+except ImportError:
+    pass
+
 from evolution import Evolver
-from score import get_nconts, cbiplddt
+from score import get_nconts, cbiplddt, calculate_samp
 from psique import pypsique
-from openfold.utils.loss import compute_tm
+
+from esm.sdk.api import ESMProtein, GenerationConfig
+from esm.models.esm3 import ESM3
 
 
 def backup_output(outpath):
@@ -30,7 +47,7 @@ def backup_output(outpath):
                 if backup.isdigit(): 
                     backup_list.append(backup)
                     last_backup = int(max(backup_list))
-        print(f'\n{outpath} already exists, renameing it to {outpath}.{str(last_backup +  1)}') 
+        print(f'\n{outpath} already exists, renaming it to {outpath}.{str(last_backup +  1)}')
         os.replace(outpath, outpath + '.' + str(last_backup +  1))
 
 
@@ -62,17 +79,35 @@ def pdbtxt2bbcoord(pdb_txt, chain='A'):
     return(coords33)
 
 def esm2data(esm_out):
-    output = {key: value.cpu() for key, value in esm_out.items()} 
-    pdbs = model.output_to_pdb(output) 
-    mask = output["atom37_atom_exists"][:,:,1] == 1 
-    chainA_mask = torch.logical_and(mask, output["chain_index"] == 0)
-    sl = np.sum(chainA_mask.numpy(), 1) # chainA_len
-    sl_len = len(sl)
-    ptm = [compute_tm(output["ptm_logits"][i][None, :sl[i],:sl[i]]).item() for i in range(sl_len)] #ptm only for chain A
-    ptm_full = esm_out["ptm"].tolist() # will clculate pTM for entire complex if more than one chain
-    plddt =  [output["plddt"][:,:,1][i][chainA_mask[i]]/100 for i in range(sl_len)] 
-    mean_plddt = [plddt[i].mean().item() for i in range(len(sl))]
-    return(pdbs, ptm, mean_plddt) #return score instead
+    # ESM3 outputs a list of ESMProtein objects
+    pdbs = []
+    ptms = []
+    mean_plddts = []
+
+    for prot in esm_out:
+        # PDB text
+        pdbs.append(prot.to_pdb_string())
+        
+        # pLDDT
+        if prot.plddt is not None:
+            if isinstance(prot.plddt, torch.Tensor):
+                plddt_val = prot.plddt.mean().item()
+            else:
+                plddt_val = float(np.mean(prot.plddt))
+            # Scale pLDDT to 0-1 if it is 0-100
+            if plddt_val > 1.0:
+                plddt_val /= 100.0
+            mean_plddts.append(plddt_val)
+        else:
+            mean_plddts.append(0.0)
+
+        # pTM
+        if prot.ptm is not None:
+            ptms.append(prot.ptm.item() if isinstance(prot.ptm, torch.Tensor) else float(prot.ptm))
+        else:
+            ptms.append(mean_plddts[-1])
+
+    return(pdbs, ptms, mean_plddts) #return score instead
 
     #calculate the number of contacts
     # bins = np.append(0,np.linspace(2.3125,21.6875,63))
@@ -117,12 +152,12 @@ def extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts) -> None:
 
         #=======================================================================# 
         #================================SCORING================================# 
-        num_conts, _mean_plddt_ = get_nconts(pdb_txt, 'A', 6.0, 50) #plddt is better only for chain A and for residues > 50
+        num_conts, _mean_plddt_ = get_nconts(pdb_txt, 'A', 8.0, 0.5) #plddt is better only for chain A and for residues > 50
 
         if args.evolution_mode == "single_chain": #if there are two or more chains, then calculate the number of interacting contacts
             num_inter_conts, iplddt = 1, 1
         else:
-            num_inter_conts, iplddt = cbiplddt(pdb_txt, 'A', 'B', 6.0, 40) 
+            num_inter_conts, iplddt = cbiplddt(pdb_txt, 'A', 'B', 8.0, 0.4) 
 
         ss, max_helix, max_beta = pypsique(pdb_txt, 'A')
         #Rg, aspher = get_aspher(pdb_txt)
@@ -131,12 +166,16 @@ def extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts) -> None:
         max_alpha_penalty = 1 - sigmoid(max_helix, args.helix_len_penalty, 0.5)
         max_beta_penalty = 1 - sigmoid(max_beta, args.beta_len_penalty, 0.6)
         
+        # calculate the AMP score for the evolving sequence
+        s_amp = calculate_samp(seq)
+
         score  = np.prod([mean_plddt,           #[0, 1]
                           ptm,                  #[0, 1]
                           iplddt,               #[0, 1]
                           prot_len_penalty,     #[0, 1]
                           max_beta_penalty,     #[0, 1]
                           max_alpha_penalty,    #[0, 1]
+                          s_amp,                # AMP fitness multiplier
                           #dG, #~[0, inf]
                           (num_conts + seq_len) / seq_len,
                           (num_inter_conts + seq_len) / (seq_len + 1) # change this to sigmod so the number of inter contacts > X would not increase the score 
@@ -159,14 +198,18 @@ def extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts) -> None:
                                 #'dG': round(dG, 3),
                                 #'ptm_full': ptm_full,
                                 #'cd' contact_density
+                                's_amp': round(s_amp, 3),
                                 'score': round(score, 3), 
                                 'sequence': seq, 
                                 'mutation': mutation,
                                 'prev_id': prev_id,
                                 'ss': ss}, index=[0])
         
-        new_gen = pd.concat([new_gen, iterlog], axis=0, ignore_index=True) 
-        os.system(f"gzip {pdb_path}{id}'.pdb' &")
+        if new_gen.empty:
+            new_gen = iterlog
+        else:
+            new_gen = pd.concat([new_gen, iterlog], axis=0, ignore_index=True) 
+        os.system(f"gzip '{pdb_path}{id}.pdb' &")
 
     print(new_gen.tail(args.pop_size).drop('gndx', axis=1).to_string(index=False, header=False))
 
@@ -202,6 +245,7 @@ def fold_evolver(args, model, evolver, logheader, init_gen) -> None:
              'num_inter_conts',
              'sel_mode',
              #'dG',
+             's_amp',
              'score', 
              'sequence', 
              'mutation',
@@ -242,31 +286,52 @@ def fold_evolver(args, model, evolver, logheader, init_gen) -> None:
                 #except  FileNotFoundError: 
                 #    pass
                 #repeat.id = id.split('_')[0] #assing a new id to the already exiting sequence
-                new_gen = pd.concat([new_gen, repeat])
+                if new_gen.empty:
+                    new_gen = repeat
+                else:
+                    new_gen = pd.concat([new_gen, repeat])
             else:
                 generated_sequences.append((id, seq)) 
                 mutation_collection.append(mutation_data)    
         
-        batched_sequences = create_batched_sequence_dataset(generated_sequences, args.max_tokens_per_batch)
-
-        #predict data for the new batch
-        for headers, sequences in batched_sequences:
-            pdbs, ptms, mean_plddts = [], [], []
-            with torch.no_grad(): 
-                pdbs, ptms, mean_plddts  = esm2data(model.infer(sequences, 
-                                                               num_recycles = args.num_recycles,
-                                                               residue_index_offset = 1,
-                                                               chain_linker = "G" * 25))
+        batched_sequences = list(create_batched_sequence_dataset(generated_sequences, args.max_tokens_per_batch))
+        if not batched_sequences:
+            continue
             
-            #run extract_results() in becground and imediately start next the round of model.infer()
-            trd = threading.Thread(target=extract_results, args=(gen_i, headers, sequences, pdbs, ptms, mean_plddts))
-            trd.start()
+        trd = None
+        pdbs, ptms, mean_plddts = [], [], []
 
-        while trd.is_alive(): 
-            time.sleep(0.2)
+        #predict data for the new batch (double-buffer pipeline)
+        for headers, sequences in batched_sequences:
+            # 1. Start scoring thread for the previous batch on CPU
+            if trd is not None:
+                trd.start()
+                
+            # 2. Predict current batch
+            if torch.backends.mps.is_available():
+                torch.mps.synchronize()
+            with torch.no_grad():
+                esm_proteins = [ESMProtein(sequence=s) for s in sequences]
+                configs = [GenerationConfig(track="structure", num_steps=1) for _ in sequences]
+                pdbs, ptms, mean_plddts = esm2data(model.batch_generate(esm_proteins, configs))
+                
+            # 3. Wait for previous scoring thread to finish
+            if trd is not None:
+                trd.join()
+                
+            # Set up thread for next iteration
+            trd = threading.Thread(target=extract_results, args=(gen_i, headers, sequences, pdbs, ptms, mean_plddts))
+            
+        # Score the final batch
+        if trd is not None:
+            trd.start()
+            trd.join()
         
         #print(f"#GENtime {datetime.now() - now}")
-        ancestral_memory =  pd.concat([ancestral_memory, init_gen])
+        if ancestral_memory.empty:
+            ancestral_memory = init_gen
+        else:
+            ancestral_memory = pd.concat([ancestral_memory, init_gen])
 
         #select the next generation 
         init_gen = evolver.select(new_gen, init_gen, args.pop_size, args.selection_mode, args.norepeat, args.beta)
@@ -277,7 +342,7 @@ def fold_evolver(args, model, evolver, logheader, init_gen) -> None:
 
         #Change the selection with a condition (plddt, ptm)
         if args.strong_selection_by_condition:
-            if (init_gen['mean_plddt'] > 0.6) & (init_gen['ptm'] > 0.5).any() & condition:
+            if (init_gen['mean_plddt'] > 0.6).any() & (init_gen['ptm'] > 0.5).any() & condition:
                 args.selection_mode = 'strong'
                 condition = False #do not change args.selection_mode anymore
                 with open(os.path.join(args.outpath, args.log), mode='a') as f:
@@ -343,6 +408,7 @@ def inter_fold_evolver(args, model, evolver, logheader, init_gen) -> None:
                'num_inter_conts',
                'sel_mode',
                #'dG',
+               's_amp',
                'score', 
                'sequence', 
                'mutation',
@@ -382,32 +448,54 @@ def inter_fold_evolver(args, model, evolver, logheader, init_gen) -> None:
                 #except  FileNotFoundError: 
                 #    pass
                 #repeat.id = id.split('_')[0] #assing a new id to the already exiting sequence
-                new_gen = pd.concat([new_gen, repeat])
+                if new_gen.empty:
+                    new_gen = repeat
+                else:
+                    new_gen = pd.concat([new_gen, repeat])
             else:
                 generated_sequences.append((id, seq + seq2)) #(seq+seq2)) add a function to select the sma
                 mutation_collection.append(mutation_data)    
 
 
-        batched_sequences = create_batched_sequence_dataset(generated_sequences, args.max_tokens_per_batch)
-
-        #predict data for the new batch
-        for headers, sequences in batched_sequences:
-            pdbs, ptms, mean_plddts = [], [], [] #TODO calculate pTM only of chain A
-            with torch.no_grad(): 
-                pdbs, ptms, mean_plddts = esm2data(model.infer(sequences, 
-                                                               num_recycles = args.num_recycles,
-                                                               residue_index_offset = 1,
-                                                               chain_linker = "GP" + "G"*30 + "PG"))
+        batched_sequences = list(create_batched_sequence_dataset(generated_sequences, args.max_tokens_per_batch))
+        if not batched_sequences:
+            continue
             
-            #run extract_results() in background and immediately start next round of model.infer()
-            trd = threading.Thread(target=extract_results, args=(gen_i, headers, sequences, pdbs, ptms, mean_plddts))
-            trd.start()
+        trd = None
+        pdbs, ptms, mean_plddts = [], [], []
 
-        while trd.is_alive(): 
-            time.sleep(0.2)
+        #predict data for the new batch (double-buffer pipeline)
+        for headers, sequences in batched_sequences:
+            # 1. Start scoring thread for the previous batch on CPU
+            if trd is not None:
+                trd.start()
+                
+            # 2. Predict current batch
+            if torch.backends.mps.is_available():
+                torch.mps.synchronize()
+            with torch.no_grad():
+                linker = "GP" + "G"*30 + "PG"
+                esm_proteins = [ESMProtein(sequence=s.replace(':', linker)) for s in sequences]
+                configs = [GenerationConfig(track="structure", num_steps=1) for _ in sequences]
+                pdbs, ptms, mean_plddts = esm2data(model.batch_generate(esm_proteins, configs))
+                
+            # 3. Wait for previous scoring thread to finish
+            if trd is not None:
+                trd.join()
+                
+            # Set up thread for next iteration
+            trd = threading.Thread(target=extract_results, args=(gen_i, headers, sequences, pdbs, ptms, mean_plddts))
+            
+        # Score the final batch
+        if trd is not None:
+            trd.start()
+            trd.join()
         
         #print(f"#GENtime {datetime.now() - now}")
-        ancestral_memory =  pd.concat([ancestral_memory, init_gen])
+        if ancestral_memory.empty:
+            ancestral_memory = init_gen
+        else:
+            ancestral_memory = pd.concat([ancestral_memory, init_gen])
 
         #select the next generation 
         init_gen = evolver.select(new_gen, init_gen, args.pop_size, args.selection_mode, args.norepeat)
@@ -425,7 +513,7 @@ if __name__ == '__main__':
     parser.add_argument(
             '-em', '--evolution_mode', type=str,
             help='evolution mode: single_chain, inter_chain, multimer',
-            default='single_chain, ',
+            default='single_chain',
     )
     parser.add_argument(
             '-sm', '--selection_mode', type=str,
@@ -473,8 +561,8 @@ if __name__ == '__main__':
     )
     parser.add_argument(
             '-pl0', '--prot_len_penalty', type=int,
-            help='population size',
-            default=250,
+            help='length penalty threshold (default 30 for AMPs)',
+            default=30,
     )
     parser.add_argument(
             '-hl0', '--helix_len_penalty', type=int,
@@ -602,9 +690,29 @@ if __name__ == '__main__':
     
 
     #load models
-    print('\nloading esm.pretrained.esmfold_v1... \n')
-    model = esm.pretrained.esmfold_v1()
-    model = model.eval().cuda()
+    print('\nloading ESM3 esm3-sm-open-v1... \n')
+    # Require HuggingFace token for gated ESM3 model access
+    if "HF_TOKEN" not in os.environ:
+        print("Error: HF_TOKEN environment variable not set. Please set it to your HuggingFace token.")
+        sys.exit(1)
+    
+    try:
+        model = ESM3.from_pretrained("esm3-sm-open-v1")
+    except Exception as e:
+        print(f"Error loading ESM3: {e}")
+        print("Please ensure you have access to the gated repository on HuggingFace and HF_TOKEN is valid.")
+        sys.exit(1)
+        
+    # Move to MPS or CUDA
+    # Explicitly configure Mac MPS device to avoid OOM via watermark ratio
+    if torch.backends.mps.is_available():
+        device = torch.device("mps")
+        os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = "0.0"
+    elif torch.cuda.is_available():
+        device = torch.device("cuda")
+    else:
+        device = torch.device("cpu")
+    model = model.eval().to(device)
 
     print('running PFES... \n')
     if args.evolution_mode == "single_chain":

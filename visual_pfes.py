@@ -57,7 +57,7 @@ def extract_lineage(log):
         df = ndx
         lineage = pd.concat([lineage, df], axis=0)
         ndx = ndx.prev_id.to_string(index=False)
-        i=+1
+        i += 1
         pbar.update(i)
     pbar.close()
     lineage = lineage.sort_index()
@@ -81,10 +81,10 @@ def make_plots(log, bestlog, lineage):
     dpi=500
 
     os.makedirs(plotdir, exist_ok=True)
-    for colname in log.keys(): 
+    for colname in log.select_dtypes(include=[np.number]).columns: 
         if not colname in ['seq', 'sequence', 'ss', 'genindex','dssp', 'mutation', 'index', 'id', 'prev_id', 'gndx', 'sel_mode']:
                 fig, ax1 = plt.subplots(figsize=(9, 3))
-                ax1.plot(log[colname],'.', markersize=ms,    color='silver', label='all mutations')
+                ax1.plot(log[colname].astype(float),'.', markersize=ms,    color='silver', label='all mutations')
                 ax1.plot(bestlog[colname],'-', linewidth=lw, label='best of the generation')
                 ax1.plot(lineage[colname],'-', linewidth=lw, color='mediumslateblue', label=f'lineage (L={len(lineage[colname])})')
                 ax1.legend(loc ="lower right")
@@ -94,7 +94,7 @@ def make_plots(log, bestlog, lineage):
                 #ax2.plot(lineage[colname].tolist(),'-', linewidth=lw, color='mediumslateblue')
                 #ax2.set(xlabel="Lineage length")
                 fig.tight_layout()
-                fig.savefig(plotdir + colname + '.png', dpi=dpi)
+                fig.savefig(os.path.join(plotdir, colname + '.png'), dpi=dpi)
                 fig.clf()
 
 #======================= Summary plot =======================#
@@ -109,55 +109,62 @@ def make_summary_plot(log, bestlog, lineage):
     fig.suptitle(None)
 
     L = len(lineage)
-    axs[0,0].plot(log.mean_plddt, '.', markersize=ms,    color='silver', label='all mutations')
-    axs[0,0].plot(bestlog.mean_plddt, '-', linewidth=lw, label='best of the generation')
-    axs[0,0].plot(lineage.mean_plddt, '-', linewidth=lw, color='mediumslateblue', label=f'lineage (L={L})')
+    axs[0,0].plot(log.mean_plddt.astype(float), '.', markersize=ms,    color='silver', label='all mutations')
+    axs[0,0].plot(bestlog.mean_plddt.astype(float), '-', linewidth=lw, label='best of the generation')
+    axs[0,0].plot(lineage.mean_plddt.astype(float), '-', linewidth=lw, color='mediumslateblue', label=f'lineage (L={L})')
     axs[0,0].set(xlabel=None, ylabel='mean pLDDT')
     axs[0,0].grid(True, which="both",linestyle='--', linewidth=0.5)
     axs[0,0].set_xticklabels([])
 
-    axs[1,0].plot(log.ptm, '.', markersize=ms,    color='silver', label='all mutations')
-    axs[1,0].plot(bestlog.ptm, '-', linewidth=lw, label='best of the generation')
-    axs[1,0].plot(lineage.ptm, '-', linewidth=lw, color='mediumslateblue', label=f'lineage (L={L})')
+    axs[1,0].plot(log.ptm.astype(float), '.', markersize=ms,    color='silver', label='all mutations')
+    axs[1,0].plot(bestlog.ptm.astype(float), '-', linewidth=lw, label='best of the generation')
+    axs[1,0].plot(lineage.ptm.astype(float), '-', linewidth=lw, color='mediumslateblue', label=f'lineage (L={L})')
     axs[1,0].set(xlabel=None, ylabel='pTM')
     axs[1,0].grid(True, which="both",linestyle='--', linewidth=0.5)
     axs[1,0].set_xticklabels([])
 
-    axs[2,0].plot(log.score,  '.', markersize=ms,    color='silver', label='all mutations')
-    axs[2,0].plot(bestlog.score, '-', linewidth=lw,  label='best of the generation')
-    axs[2,0].plot(lineage.score,  '-', linewidth=lw, color='mediumslateblue', label=f'lineage (L={L})')
+    axs[2,0].plot(log.score.astype(float),  '.', markersize=ms,    color='silver', label='all mutations')
+    axs[2,0].plot(bestlog.score.astype(float), '-', linewidth=lw,  label='best of the generation')
+    axs[2,0].plot(lineage.score.astype(float),  '-', linewidth=lw, color='mediumslateblue', label=f'lineage (L={L})')
     axs[2,0].set(xlabel='Total number of mutations', ylabel='Score')
     axs[2,0].grid(True, which="both",linestyle='--', linewidth=0.5)
     axs[2,0].legend(loc ="lower right")
 
-    axs[0,1].plot(log.seq_len, '.', markersize=ms,    color='silver', label='all mutations')
-    axs[0,1].plot(bestlog.seq_len, '-', linewidth=lw, label='best of the generation')
-    axs[0,1].plot(lineage.seq_len, '-', linewidth=lw, color='mediumslateblue', label=f'lineage (L={L})')
+    axs[0,1].plot(log.seq_len.astype(float), '.', markersize=ms,    color='silver', label='all mutations')
+    axs[0,1].plot(bestlog.seq_len.astype(float), '-', linewidth=lw, label='best of the generation')
+    axs[0,1].plot(lineage.seq_len.astype(float), '-', linewidth=lw, color='mediumslateblue', label=f'lineage (L={L})')
     axs[0,1].set(xlabel=None, ylabel='Sequence length')
     axs[0,1].grid(True, which="both",linestyle='--', linewidth=0.5)
     axs[0,1].set_xticklabels([])
 
     if 'num_inter_conts' in bestlog.columns and bestlog.num_inter_conts.max() != 1:
-        axs[1,1].plot(log.iplddt, '.', markersize=ms,    color='silver', label='all mutations')
-        axs[1,1].plot(bestlog.iplddt, '-', linewidth=lw, label='best of the generation')
-        axs[1,1].plot(lineage.iplddt, '-', linewidth=lw, color='mediumslateblue', label=f'lineage (L={L})')
+        axs[1,1].plot(log.iplddt.astype(float), '.', markersize=ms,    color='silver', label='all mutations')
+        axs[1,1].plot(bestlog.iplddt.astype(float), '-', linewidth=lw, label='best of the generation')
+        axs[1,1].plot(lineage.iplddt.astype(float), '-', linewidth=lw, color='mediumslateblue', label=f'lineage (L={L})')
         axs[1,1].set(xlabel=None, ylabel='iPLDDT')
         axs[1,1].grid(True, which="both",linestyle='--', linewidth=0.5)
         axs[1,1].set_xticklabels([])
 
     else:     
-        axs[1,1].plot(log.max_beta_penalty, '.', markersize=ms,    color='silver', label='all mutations')
-        axs[1,1].plot(bestlog.max_beta_penalty, '-', linewidth=lw, label='best of the generation')
-        axs[1,1].plot(lineage.max_beta_penalty, '-', linewidth=lw, color='mediumslateblue', label=f'lineage (L={L})')
+        axs[1,1].plot(log.max_beta_penalty.astype(float), '.', markersize=ms,    color='silver', label='all mutations')
+        axs[1,1].plot(bestlog.max_beta_penalty.astype(float), '-', linewidth=lw, label='best of the generation')
+        axs[1,1].plot(lineage.max_beta_penalty.astype(float), '-', linewidth=lw, color='mediumslateblue', label=f'lineage (L={L})')
         axs[1,1].set(xlabel=None, ylabel='SS penalty')
         axs[1,1].grid(True, which="both",linestyle='--', linewidth=0.5)
         axs[1,1].set_xticklabels([])
 
-    axs[2,1].plot(log.num_conts, '.', markersize=ms,  color='silver', label='all mutations')
-    axs[2,1].plot(bestlog.num_conts, '-', linewidth=lw, label='best of the generation')
-    axs[2,1].plot(lineage.num_conts, '-', linewidth=lw, color='mediumslateblue', label=f'lineage (L={L})')
-    axs[2,1].set(xlabel='Total number of mutations', ylabel='Number of contacts')
-    axs[2,1].grid(True, which="both",linestyle='--', linewidth=0.5)
+    if 's_amp' in log.columns:
+        axs[2,1].plot(log.s_amp.astype(float), '.', markersize=ms,  color='silver', label='all mutations')
+        axs[2,1].plot(bestlog.s_amp.astype(float), '-', linewidth=lw, label='best of the generation')
+        axs[2,1].plot(lineage.s_amp.astype(float), '-', linewidth=lw, color='mediumslateblue', label=f'lineage (L={L})')
+        axs[2,1].set(xlabel='Total number of mutations', ylabel='AMP Score')
+        axs[2,1].grid(True, which="both",linestyle='--', linewidth=0.5)
+    else:
+        axs[2,1].plot(log.num_conts.astype(float), '.', markersize=ms,  color='silver', label='all mutations')
+        axs[2,1].plot(bestlog.num_conts.astype(float), '-', linewidth=lw, label='best of the generation')
+        axs[2,1].plot(lineage.num_conts.astype(float), '-', linewidth=lw, color='mediumslateblue', label=f'lineage (L={L})')
+        axs[2,1].set(xlabel='Total number of mutations', ylabel='Number of contacts')
+        axs[2,1].grid(True, which="both",linestyle='--', linewidth=0.5)
 
     #plt.xticks(rotation=45)
 
@@ -320,7 +327,7 @@ def backbone_traj(trajlog, pdbdir):
         top = traj.select_atoms('protein')
 
         warnings.filterwarnings("ignore")
-        if 'num_inter_conts' in trajlog.columns and bestlog.num_inter_conts.max() != 1:
+        if 'num_inter_conts' in trajlog.columns and trajlog.num_inter_conts.max() != 1:
             chianID = 'chainID B'
         else:
             chianID = 'chainID A'
@@ -345,7 +352,11 @@ pdbdir = args.pdbdir
 plotdir = os.path.join(outdir, 'plots/')
 trajpath = os.path.join(outdir, args.traj)
 
-log = pd.read_csv(args.log, sep='\t', comment='#')
+try:
+    log = pd.read_csv(args.log, sep='\t', comment='#')
+except FileNotFoundError:
+    print(f'Error: Could not find log file at {args.log}')
+    exit(1)
 
 log = log.iloc[args.start:args.end]
 
