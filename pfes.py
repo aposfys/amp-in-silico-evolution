@@ -128,6 +128,43 @@ def sigmoid(x,L0=0,c=0.1):
     return 1 / (1+2.71828182**(c * (L0-x)))
 
 
+_W = 74  # output column width
+
+def _print_startup(args, evolver, date_now, time_now):
+    print(f"\n{'═'*_W}")
+    print(f"  PFES v0.1  │  {date_now}  {time_now}  │  {os.getcwd()}")
+    print(f"{'─'*_W}")
+    print(f"  mode:       {args.evolution_mode}  │  selection: {args.selection_mode}  (β={args.beta})")
+    print(f"  pop size:   {args.pop_size}  │  generations: {args.num_generations}  │  evoldict: {args.evoldict}")
+    init_display = args.initial_seq if len(args.initial_seq) <= 40 else args.initial_seq[:40] + '…'
+    print(f"  init seq:   {init_display}  (rand_len={args.random_seq_len})")
+    print(f"  penalties:  len≥{args.prot_len_penalty}  helix≥{args.helix_len_penalty}  beta≥{args.beta_len_penalty}")
+    print(f"  output:     {args.outpath}/{args.log}")
+    print(f"{'═'*_W}\n")
+
+def _print_gen_summary(gen_i, num_gen, new_gen, elapsed):
+    top = new_gen.sort_values('score', ascending=False)
+    has_samp = 's_amp' in top.columns
+    print(f"\n  ── Gen {gen_i + 1}/{num_gen}  ({elapsed:.1f}s) {'─' * (_W - 22)}")
+    hdr = f"  {'score':>6}  {'pLDDT':>6}  {'pTM':>5}"
+    hdr += f"  {'s_amp':>6}" if has_samp else ""
+    hdr += f"  {'len':>4}  {'mutation':<14}  sequence"
+    print(hdr)
+    sep = f"  {'─'*6}  {'─'*6}  {'─'*5}"
+    sep += f"  {'─'*6}" if has_samp else ""
+    sep += f"  {'─'*4}  {'─'*14}  {'─'*20}"
+    print(sep)
+    for _, row in top.iterrows():
+        seq = str(row.sequence)
+        seq_disp = seq[:20] + '…' if len(seq) > 20 else seq
+        mut = str(row.mutation)[:14]
+        line = f"  {float(row.score):>6.3f}  {float(row.mean_plddt):>6.3f}  {float(row.ptm):>5.3f}"
+        line += f"  {float(row.s_amp):>6.3f}" if has_samp else ""
+        line += f"  {int(row.seq_len):>4}  {mut:<14}  {seq_disp}"
+        print(line)
+    print()
+
+
 #==============================================================================================#
 #================================== EXTRACT AND SCORE =========================================#
 #==============================================================================================#
@@ -211,8 +248,6 @@ def extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts) -> None:
             new_gen = pd.concat([new_gen, iterlog], axis=0, ignore_index=True) 
         os.system(f"gzip '{pdb_path}{id}.pdb' &")
 
-    print(new_gen.tail(args.pop_size).drop('gndx', axis=1).to_string(index=False, header=False))
-
 
 def multimer_evolver(model, args):  
     print("evolution of interacting dimers")
@@ -259,45 +294,42 @@ def fold_evolver(args, model, evolver, logheader, init_gen) -> None:
     #mutate seqs from init_gen and select the best N seqs for the next generation    
     for gen_i in range(args.num_generations):
         n = 0
-        global new_gen #this will be modified in the extract_results() 
+        global new_gen #this will be modified in the extract_results()
         new_gen = pd.DataFrame(columns=columns)
-        #now = datetime.now()
+        gen_start = time.time()
         generated_sequences = []
         mutation_collection = []
 
         for prev_id, sequence in zip(init_gen.id, init_gen.sequence):
             seq, mutation_data= evolver.mutate(sequence)
-            
-            #check if the mutated seqeuece was already predicted
-            seqmask = ancestral_memory.sequence == seq 
-            
+
+            #check if the mutated sequence was already predicted
+            seqmask = ancestral_memory.sequence == seq
+
             #if --norepeat and seq is in the ancestral_memory mutate it again
-            if args.norepeat and seqmask.any():  
+            if args.norepeat and seqmask.any():
                 while seqmask.any():
                     seq, mutation_data = evolver.mutate(seq)
-                    seqmask = ancestral_memory.sequence == seq 
+                    seqmask = ancestral_memory.sequence == seq
 
-            id = "g{0}seq{1}_{2}_{3}".format(gen_i, n, prev_id, mutation_data); n+=1 # gives an unique id even if the same sequence already exists            
+            id = "g{0}seq{1}_{2}_{3}".format(gen_i, n, prev_id, mutation_data); n+=1
 
-            if seqmask.any(): #if sequence already exits do not predict a structure again 
-                repeat = ancestral_memory[seqmask].drop_duplicates(subset=['sequence'], keep='last') 
-                #try:
-                #    shutil.copyfile(pdb_path + repeat.id.values[0] + '.pdb', pdb_path + id.split('_')[0] + '.pdb')  
-                #except  FileNotFoundError: 
-                #    pass
-                #repeat.id = id.split('_')[0] #assing a new id to the already exiting sequence
+            if seqmask.any(): #if sequence already exits do not predict a structure again
+                repeat = ancestral_memory[seqmask].drop_duplicates(subset=['sequence'], keep='last')
                 if new_gen.empty:
                     new_gen = repeat
                 else:
                     new_gen = pd.concat([new_gen, repeat])
             else:
-                generated_sequences.append((id, seq)) 
-                mutation_collection.append(mutation_data)    
-        
+                generated_sequences.append((id, seq))
+                mutation_collection.append(mutation_data)
+
         batched_sequences = list(create_batched_sequence_dataset(generated_sequences, args.max_tokens_per_batch))
         if not batched_sequences:
             continue
-            
+
+        print(f"  Gen {gen_i + 1:>4}/{args.num_generations}  │  folding {len(generated_sequences)} sequences...", end='  ', flush=True)
+
         trd = None
         pdbs, ptms, mean_plddts = [], [], []
 
@@ -306,7 +338,7 @@ def fold_evolver(args, model, evolver, logheader, init_gen) -> None:
             # 1. Start scoring thread for the previous batch on CPU
             if trd is not None:
                 trd.start()
-                
+
             # 2. Predict current batch
             if torch.backends.mps.is_available():
                 torch.mps.synchronize()
@@ -314,37 +346,37 @@ def fold_evolver(args, model, evolver, logheader, init_gen) -> None:
                 esm_proteins = [ESMProtein(sequence=s) for s in sequences]
                 configs = [GenerationConfig(track="structure", num_steps=1) for _ in sequences]
                 pdbs, ptms, mean_plddts = esm2data(model.batch_generate(esm_proteins, configs))
-                
+
             # 3. Wait for previous scoring thread to finish
             if trd is not None:
                 trd.join()
-                
+
             # Set up thread for next iteration
             trd = threading.Thread(target=extract_results, args=(gen_i, headers, sequences, pdbs, ptms, mean_plddts))
-            
+
         # Score the final batch
         if trd is not None:
             trd.start()
             trd.join()
-        
-        #print(f"#GENtime {datetime.now() - now}")
+
+        _print_gen_summary(gen_i, args.num_generations, new_gen, time.time() - gen_start)
+
         if ancestral_memory.empty:
             ancestral_memory = init_gen
         else:
             ancestral_memory = pd.concat([ancestral_memory, init_gen])
 
-        #select the next generation 
+        #select the next generation
         init_gen = evolver.select(new_gen, init_gen, args.pop_size, args.selection_mode, args.norepeat, args.beta)
         init_gen.gndx = f'gndx{gen_i}' #assign a new gen index
         init_gen.to_csv(os.path.join(args.outpath, args.log), mode='a', index=False, header=False, sep='\t')
-
-        #TODO write init_gen as a checkpoit file to continue the simulation
 
         #Change the selection with a condition (plddt, ptm)
         if args.strong_selection_by_condition:
             if (init_gen['mean_plddt'] > 0.6).any() & (init_gen['ptm'] > 0.5).any() & condition:
                 args.selection_mode = 'strong'
-                condition = False #do not change args.selection_mode anymore
+                condition = False
+                print(f"  → Selection switched to STRONG (pLDDT > 0.6, pTM > 0.5 reached at gen {gen_i + 1})")
                 with open(os.path.join(args.outpath, args.log), mode='a') as f:
                     f.write("#changing the selection mode to strong")
 
@@ -353,15 +385,15 @@ def fold_evolver(args, model, evolver, logheader, init_gen) -> None:
             if (gen_i > args.strong_selection_after_n_gen) & condition:
                 args.selection_mode = 'strong'
                 evolver = Evolver('flatoptim')
-                condition = False #do not change args.selection_mode anymore
-                print("#changing the selection mode to strong")
+                condition = False
+                print(f"  → Selection switched to STRONG after {gen_i + 1} generations")
                 with open(os.path.join(args.outpath, args.log), mode='a') as f:
                     f.write("#changing the selection mode to strong")
 
         #stop simulation by a condition
         if args.stop_by_condition:
             if (init_gen['mean_plddt'] > 0.85).any() & (init_gen['ptm'] > 0.75).any():
-                print(f'gndx={gen_i}; the condition reached, breaking!')
+                print(f"\n  ✓ Stopping condition reached at gen {gen_i + 1}  (pLDDT > 0.85, pTM > 0.75)\n")
                 break
 
  
@@ -418,49 +450,45 @@ def inter_fold_evolver(args, model, evolver, logheader, init_gen) -> None:
     ancestral_memory = pd.DataFrame(columns=columns)
     ancestral_memory.to_csv(os.path.join(args.outpath, args.log), mode='a', index=False, header=True, sep='\t') #write header of the progress log
     
-    #mutate seqs from init_gen and select the best n seqs for the next generation    
+    #mutate seqs from init_gen and select the best n seqs for the next generation
     for gen_i in range(args.num_generations):
         n = 0
-        global new_gen #this will be modified in the extract_results() 
+        global new_gen #this will be modified in the extract_results()
         new_gen = pd.DataFrame(columns=columns)
-        #now = datetime.now()
+        gen_start = time.time()
         generated_sequences = []
         mutation_collection = []
 
         for prev_id, sequence in zip(init_gen.id, init_gen.sequence):
             seq, mutation_data= evolver.mutate(sequence)
-            
-            #chek if the mutated sequence was already predicted
-            seqmask = ancestral_memory.sequence == seq 
-            
+
+            #check if the mutated sequence was already predicted
+            seqmask = ancestral_memory.sequence == seq
+
             #if --norepeat and seq is in the ancestral_memory mutate it again
-            if args.norepeat and seqmask.any():  
+            if args.norepeat and seqmask.any():
                 while seqmask.any():
                     seq, mutation_data = evolver.mutate(seq)
-                    seqmask = ancestral_memory.sequence == seq 
+                    seqmask = ancestral_memory.sequence == seq
 
-            id = "g{0}seq{1}_{2}_{3}".format(gen_i, n, prev_id, mutation_data); n+=1 # give an uniq id even if the same sequence already exists            
+            id = "g{0}seq{1}_{2}_{3}".format(gen_i, n, prev_id, mutation_data); n+=1
 
-            if seqmask.any(): #if sequence already exits do not predict a structure again 
-                repeat = ancestral_memory[seqmask].drop_duplicates(subset=['sequence'], keep='last') 
-                #try:
-                #    shutil.copyfile(pdb_path + repeat.id.values[0] + '.pdb', pdb_path + id.split('_')[0] + '.pdb')  
-                #except  FileNotFoundError: 
-                #    pass
-                #repeat.id = id.split('_')[0] #assing a new id to the already exiting sequence
+            if seqmask.any(): #if sequence already exits do not predict a structure again
+                repeat = ancestral_memory[seqmask].drop_duplicates(subset=['sequence'], keep='last')
                 if new_gen.empty:
                     new_gen = repeat
                 else:
                     new_gen = pd.concat([new_gen, repeat])
             else:
-                generated_sequences.append((id, seq + seq2)) #(seq+seq2)) add a function to select the sma
-                mutation_collection.append(mutation_data)    
-
+                generated_sequences.append((id, seq + seq2))
+                mutation_collection.append(mutation_data)
 
         batched_sequences = list(create_batched_sequence_dataset(generated_sequences, args.max_tokens_per_batch))
         if not batched_sequences:
             continue
-            
+
+        print(f"  Gen {gen_i + 1:>4}/{args.num_generations}  │  folding {len(generated_sequences)} sequences...", end='  ', flush=True)
+
         trd = None
         pdbs, ptms, mean_plddts = [], [], []
 
@@ -469,7 +497,7 @@ def inter_fold_evolver(args, model, evolver, logheader, init_gen) -> None:
             # 1. Start scoring thread for the previous batch on CPU
             if trd is not None:
                 trd.start()
-                
+
             # 2. Predict current batch
             if torch.backends.mps.is_available():
                 torch.mps.synchronize()
@@ -478,26 +506,27 @@ def inter_fold_evolver(args, model, evolver, logheader, init_gen) -> None:
                 esm_proteins = [ESMProtein(sequence=s.replace(':', linker)) for s in sequences]
                 configs = [GenerationConfig(track="structure", num_steps=1) for _ in sequences]
                 pdbs, ptms, mean_plddts = esm2data(model.batch_generate(esm_proteins, configs))
-                
+
             # 3. Wait for previous scoring thread to finish
             if trd is not None:
                 trd.join()
-                
+
             # Set up thread for next iteration
             trd = threading.Thread(target=extract_results, args=(gen_i, headers, sequences, pdbs, ptms, mean_plddts))
-            
+
         # Score the final batch
         if trd is not None:
             trd.start()
             trd.join()
-        
-        #print(f"#GENtime {datetime.now() - now}")
+
+        _print_gen_summary(gen_i, args.num_generations, new_gen, time.time() - gen_start)
+
         if ancestral_memory.empty:
             ancestral_memory = init_gen
         else:
             ancestral_memory = pd.concat([ancestral_memory, init_gen])
 
-        #select the next generation 
+        #select the next generation
         init_gen = evolver.select(new_gen, init_gen, args.pop_size, args.selection_mode, args.norepeat)
         init_gen.gndx = f'gndx{gen_i}' #assign a new gen index
         init_gen.to_csv(os.path.join(args.outpath, args.log), mode='a', index=False, header=False, sep='\t')
@@ -658,7 +687,7 @@ if __name__ == '__main__':
 #==========================================================#
 '''
     
-    print(logheader)
+    _print_startup(args, evolver, date_now, time_now)
 
     #backup if output directory exists
     if args.nobackup:
@@ -689,22 +718,20 @@ if __name__ == '__main__':
                                  'score': [0.001] * args.pop_size})
     
 
-    #load models
-    print('\nloading ESM3 esm3-sm-open-v1... \n')
     # Require HuggingFace token for gated ESM3 model access
     if "HF_TOKEN" not in os.environ:
-        print("Error: HF_TOKEN environment variable not set. Please set it to your HuggingFace token.")
+        print(f"  Error: HF_TOKEN environment variable not set.")
+        print(f"  Run:  export HF_TOKEN=your_huggingface_token")
         sys.exit(1)
-    
+
+    print(f"  Loading ESM3 (esm3-sm-open-v1)...", end='  ', flush=True)
     try:
         model = ESM3.from_pretrained("esm3-sm-open-v1")
     except Exception as e:
-        print(f"Error loading ESM3: {e}")
-        print("Please ensure you have access to the gated repository on HuggingFace and HF_TOKEN is valid.")
+        print(f"\n  Error loading ESM3: {e}")
+        print(f"  Ensure you have accepted the model license at huggingface.co and HF_TOKEN is valid.")
         sys.exit(1)
-        
-    # Move to MPS or CUDA
-    # Explicitly configure Mac MPS device to avoid OOM via watermark ratio
+
     if torch.backends.mps.is_available():
         device = torch.device("mps")
         os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = "0.0"
@@ -713,16 +740,16 @@ if __name__ == '__main__':
     else:
         device = torch.device("cpu")
     model = model.eval().to(device)
+    print(f"ready  [{device}]\n")
 
-    print('running PFES... \n')
     if args.evolution_mode == "single_chain":
         fold_evolver(args, model, evolver, logheader, init_gen)
     elif args.evolution_mode == "inter_chain":
         inter_fold_evolver(args, model, evolver, logheader, init_gen)
     elif args.evolution_mode == "multimer":
-        print("sorry, I am not ready yet")
-    elif not args.evolution_mode in ['single_chain', 'inter_chain', 'multimer']:
-        print("Unknown PFES mode: aveilable options are: single_chain, inter_chain or multimer")
+        print("  multimer mode is not yet implemented")
+    else:
+        print(f"  Unknown evolution mode: '{args.evolution_mode}'  (options: single_chain, inter_chain, multimer)")
 
 
 
