@@ -115,9 +115,8 @@ def get_nconts(pdb_txt, chain="A", distance_cutoff=6.0, plddt_cutoff=0):
     if len(ca_data) == 0:
         mean_plddt = np.mean(np.array(plddt)) if len(plddt) > 0 else 0.0
         return(1, round(mean_plddt * 0.01, 2))
-    else:    
+    else:
         coords = np.array([item[1] for item in ca_data])  # Extract coordinates
-        CA_pLDDT = np.mean(np.array([item[2] for item in ca_data]))
         mean_plddt = np.mean(np.array(plddt))
         n_atoms = len(coords)
         #pairs_data = np.zeros((0, 5))
@@ -175,12 +174,6 @@ def get_inter_nconts(pdb_txt, chainA='A', chainB='B', distance_cutoff=6.0, plddt
     else:    
         Acoords = np.array([item[1] for item in cb_data_A])
         Bcoords = np.array([item[1] for item in cb_data_B])
-        CA_pLDDT_A = np.mean(np.array([item[2] for item in cb_data_A]))
-
-        #make pairs of coordinates and calculate distace between them
-        n_atoms_A = len(cb_data_A)
-        n_atoms_B = len(cb_data_B)
-        pairs_data = np.zeros((0, 4))
 
         distances_matrix = np.linalg.norm(Acoords[:, None] - Bcoords, axis=2)
         contact_map = distances_matrix.copy()
@@ -227,7 +220,6 @@ def cbiplddt(pdb_txt, chainA='A', chainB='B', distance_cutoff=6.0, plddt_cutoff=
         #Bcoords = cb_data_B[:,2:5]
         Acoords = np.array([item[2:5] for item in cb_data_A], dtype="float32")
         Bcoords = np.array([item[2:5] for item in cb_data_B], dtype="float32")
-        CB_pLDDT_A = np.array([item[5] for item in cb_data_A], dtype="float32").mean()
         distances_matrix = np.linalg.norm(Acoords[:, None] - Bcoords, axis=2)
         #contact_map = distances_matrix.copy()
         #contact_map[contact_map <= distance_cutoff] = 1
