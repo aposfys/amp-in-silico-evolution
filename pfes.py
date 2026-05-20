@@ -29,7 +29,7 @@ except ImportError:
     pass
 
 from evolution import Evolver
-from score import get_nconts, cbiplddt, calculate_samp
+from score import get_nconts, cbiplddt, calculate_samp, macrel_score_batch
 from psique import pypsique
 
 from esm.sdk.api import ESMProtein, GenerationConfig
@@ -145,13 +145,16 @@ def _print_startup(args, evolver, date_now, time_now):
 def _print_gen_summary(gen_i, num_gen, new_gen, elapsed):
     top = new_gen.sort_values('score', ascending=False)
     has_samp = 's_amp' in top.columns
+    has_hemo = 'hemo_prob' in top.columns
     print(f"\n  ── Gen {gen_i + 1}/{num_gen}  ({elapsed:.1f}s) {'─' * (_W - 22)}")
     hdr = f"  {'score':>6}  {'pLDDT':>6}  {'pTM':>5}"
-    hdr += f"  {'s_amp':>6}" if has_samp else ""
+    hdr += f"  {'AMP':>5}" if has_samp else ""
+    hdr += f"  {'hemo':>5}" if has_hemo else ""
     hdr += f"  {'len':>4}  {'mutation':<14}  sequence"
     print(hdr)
     sep = f"  {'─'*6}  {'─'*6}  {'─'*5}"
-    sep += f"  {'─'*6}" if has_samp else ""
+    sep += f"  {'─'*5}" if has_samp else ""
+    sep += f"  {'─'*5}" if has_hemo else ""
     sep += f"  {'─'*4}  {'─'*14}  {'─'*20}"
     print(sep)
     for _, row in top.iterrows():
@@ -159,7 +162,8 @@ def _print_gen_summary(gen_i, num_gen, new_gen, elapsed):
         seq_disp = seq[:20] + '…' if len(seq) > 20 else seq
         mut = str(row.mutation)[:14]
         line = f"  {float(row.score):>6.3f}  {float(row.mean_plddt):>6.3f}  {float(row.ptm):>5.3f}"
-        line += f"  {float(row.s_amp):>6.3f}" if has_samp else ""
+        line += f"  {float(row.s_amp):>5.3f}" if has_samp else ""
+        line += f"  {float(row.hemo_prob):>5.3f}" if has_hemo else ""
         line += f"  {int(row.seq_len):>4}  {mut:<14}  {seq_disp}"
         print(line)
     print()
@@ -169,42 +173,42 @@ def _print_gen_summary(gen_i, num_gen, new_gen, elapsed):
 #================================== EXTRACT AND SCORE =========================================#
 #==============================================================================================#
 
-def extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts) -> None:
+def extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_scores) -> None:
     global new_gen #this will be modified in the fold_evolver()
 
     for meta_id, seq, pdb_txt, ptm, mean_plddt, in zip(headers, sequences, pdbs, ptms, mean_plddts): #which plddt is better? this is plddt for both A and B chains in case of inter_chain
-        
+
         all_seqs = seq.split(':')
         seq = all_seqs[0]
         seq_len = len(seq)
-        
+
         id_data = meta_id.split('_')
 
         id = id_data[0]
         prev_id = id_data[1]
         mutation = id_data[2]
 
-        with open(pdb_path + id + '.pdb', 'wb') as f: 
-            f.write(pdb_txt.encode())   
+        with open(pdb_path + id + '.pdb', 'wb') as f:
+            f.write(pdb_txt.encode())
 
-        #=======================================================================# 
-        #================================SCORING================================# 
+        #=======================================================================#
+        #================================SCORING================================#
         num_conts, _mean_plddt_ = get_nconts(pdb_txt, 'A', 8.0, 0.5) #plddt is better only for chain A and for residues > 50
 
         if args.evolution_mode == "single_chain": #if there are two or more chains, then calculate the number of interacting contacts
             num_inter_conts, iplddt = 1, 1
         else:
-            num_inter_conts, iplddt = cbiplddt(pdb_txt, 'A', 'B', 8.0, 0.4) 
+            num_inter_conts, iplddt = cbiplddt(pdb_txt, 'A', 'B', 8.0, 0.4)
 
         ss, max_helix, max_beta = pypsique(pdb_txt, 'A')
         #Rg, aspher = get_aspher(pdb_txt)
-        #dG = dGscore(pdbtxt2bbcoord(pdb_txt), seq) 
+        #dG = dGscore(pdbtxt2bbcoord(pdb_txt), seq)
         prot_len_penalty =  1 - sigmoid(seq_len, args.prot_len_penalty, 0.2)
         max_alpha_penalty = 1 - sigmoid(max_helix, args.helix_len_penalty, 0.5)
         max_beta_penalty = 1 - sigmoid(max_beta, args.beta_len_penalty, 0.6)
-        
-        # calculate the AMP score for the evolving sequence
-        s_amp = calculate_samp(seq)
+
+        # MACREL AMP probability and hemolytic penalty
+        s_amp, hemo_prob = macrel_scores.get(seq, (calculate_samp(seq), 0.0))
 
         score  = np.prod([mean_plddt,           #[0, 1]
                           ptm,                  #[0, 1]
@@ -212,32 +216,34 @@ def extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts) -> None:
                           prot_len_penalty,     #[0, 1]
                           max_beta_penalty,     #[0, 1]
                           max_alpha_penalty,    #[0, 1]
-                          s_amp,                # AMP fitness multiplier
+                          s_amp,                # MACREL AMP probability
+                          1 - hemo_prob,        # hemolytic penalty
                           #dG, #~[0, inf]
                           (num_conts + seq_len) / seq_len,
-                          (num_inter_conts + seq_len) / (seq_len + 1) # change this to sigmod so the number of inter contacts > X would not increase the score 
-                          ]) 
+                          (num_inter_conts + seq_len) / (seq_len + 1) # change this to sigmod so the number of inter contacts > X would not increase the score
+                          ])
         #================================SCORING================================#
-        #=======================================================================# 
+        #=======================================================================#
 
         iterlog = pd.DataFrame({'gndx': gen_i,
-                                'id': id, 
+                                'id': id,
                                 'seq_len': seq_len,
-                                'prot_len_penalty': round(prot_len_penalty, 2), 
+                                'prot_len_penalty': round(prot_len_penalty, 2),
                                 'max_alpha_penalty': round(max_alpha_penalty, 2),
                                 'max_beta_penalty': round(max_beta_penalty, 2),
-                                'ptm': round(ptm, 2), 
-                                'mean_plddt': round(mean_plddt, 2), 
-                                'num_conts': num_conts, 
+                                'ptm': round(ptm, 2),
+                                'mean_plddt': round(mean_plddt, 2),
+                                'num_conts': num_conts,
                                 'iplddt': iplddt,
-                                'num_inter_conts': num_inter_conts, 
+                                'num_inter_conts': num_inter_conts,
                                 'sel_mode': args.selection_mode,
                                 #'dG': round(dG, 3),
                                 #'ptm_full': ptm_full,
                                 #'cd' contact_density
                                 's_amp': round(s_amp, 3),
-                                'score': round(score, 3), 
-                                'sequence': seq, 
+                                'hemo_prob': round(hemo_prob, 3),
+                                'score': round(score, 3),
+                                'sequence': seq,
                                 'mutation': mutation,
                                 'prev_id': prev_id,
                                 'ss': ss}, index=[0])
@@ -268,30 +274,31 @@ def fold_evolver(args, model, evolver, logheader, init_gen) -> None:
     
     #creare an initial pool of sequences with pop_size
     columns=['gndx',
-             'id', 
-             'seq_len', 
-             'prot_len_penalty', 
+             'id',
+             'seq_len',
+             'prot_len_penalty',
              'max_alpha_penalty',
              'max_beta_penalty',
-             'ptm', 
-             'mean_plddt', 
-             'num_conts', 
+             'ptm',
+             'mean_plddt',
+             'num_conts',
              'iplddt',
              'num_inter_conts',
              'sel_mode',
              #'dG',
              's_amp',
-             'score', 
-             'sequence', 
+             'hemo_prob',
+             'score',
+             'sequence',
              'mutation',
              'prev_id',
              'ss']
-    
+
 
     ancestral_memory = pd.DataFrame(columns=columns)
     ancestral_memory.to_csv(os.path.join(args.outpath, args.log), mode='a', index=False, header=True, sep='\t') #write header of the progress log
-    
-    #mutate seqs from init_gen and select the best N seqs for the next generation    
+
+    #mutate seqs from init_gen and select the best N seqs for the next generation
     for gen_i in range(args.num_generations):
         n = 0
         global new_gen #this will be modified in the extract_results()
@@ -339,7 +346,7 @@ def fold_evolver(args, model, evolver, logheader, init_gen) -> None:
             if trd is not None:
                 trd.start()
 
-            # 2. Predict current batch
+            # 2. Predict current batch on GPU
             if torch.backends.mps.is_available():
                 torch.mps.synchronize()
             with torch.no_grad():
@@ -351,8 +358,11 @@ def fold_evolver(args, model, evolver, logheader, init_gen) -> None:
             if trd is not None:
                 trd.join()
 
-            # Set up thread for next iteration
-            trd = threading.Thread(target=extract_results, args=(gen_i, headers, sequences, pdbs, ptms, mean_plddts))
+            # 4. Run MACREL on current batch (CPU, after GPU fold)
+            macrel_scores = macrel_score_batch(sequences)
+
+            # 5. Set up scoring thread for current batch
+            trd = threading.Thread(target=extract_results, args=(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_scores))
 
         # Score the final batch
         if trd is not None:
@@ -428,24 +438,25 @@ def inter_fold_evolver(args, model, evolver, logheader, init_gen) -> None:
 
     #creare an initial pool of sequences with pop_size
     columns = ['gndx',
-               'id', 
-               'seq_len', 
+               'id',
+               'seq_len',
                'prot_len_penalty',
                'max_alpha_penalty',
                'max_beta_penalty',
-               'ptm', 
-               'mean_plddt', 
-               'num_conts', 
+               'ptm',
+               'mean_plddt',
+               'num_conts',
                'iplddt',
                'num_inter_conts',
                'sel_mode',
                #'dG',
                's_amp',
-               'score', 
-               'sequence', 
+               'hemo_prob',
+               'score',
+               'sequence',
                'mutation',
                'prev_id',
-               'ss'] 
+               'ss']
       
     ancestral_memory = pd.DataFrame(columns=columns)
     ancestral_memory.to_csv(os.path.join(args.outpath, args.log), mode='a', index=False, header=True, sep='\t') #write header of the progress log
@@ -498,7 +509,7 @@ def inter_fold_evolver(args, model, evolver, logheader, init_gen) -> None:
             if trd is not None:
                 trd.start()
 
-            # 2. Predict current batch
+            # 2. Predict current batch on GPU
             if torch.backends.mps.is_available():
                 torch.mps.synchronize()
             with torch.no_grad():
@@ -511,8 +522,12 @@ def inter_fold_evolver(args, model, evolver, logheader, init_gen) -> None:
             if trd is not None:
                 trd.join()
 
-            # Set up thread for next iteration
-            trd = threading.Thread(target=extract_results, args=(gen_i, headers, sequences, pdbs, ptms, mean_plddts))
+            # 4. Run MACREL on chain A only (CPU, after GPU fold)
+            chain_a_seqs = [s.split(':')[0] for s in sequences]
+            macrel_scores = macrel_score_batch(chain_a_seqs)
+
+            # 5. Set up scoring thread for current batch
+            trd = threading.Thread(target=extract_results, args=(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_scores))
 
         # Score the final batch
         if trd is not None:
