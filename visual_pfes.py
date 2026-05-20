@@ -71,7 +71,8 @@ def extract_lineage(log):
     if float(r.num_inter_conts) > 1:
         print(f"  iPLDDT:   {float(r.iplddt):.4f}   │  InterConts: {int(r.num_inter_conts)}")
     if 's_amp' in lineage.columns:
-        print(f"  s_amp:    {float(r.s_amp):.4f}")
+        hemo_str = f"   │  hemo: {float(r.hemo_prob):.4f}" if 'hemo_prob' in lineage.columns else ""
+        print(f"  AMP prob: {float(r.s_amp):.4f}{hemo_str}")
     print(f"  Contacts: {int(r.num_conts)}")
     seq = str(r.sequence)
     ss  = str(r.ss)
@@ -170,7 +171,8 @@ def make_summary_plot(log, bestlog, lineage):
         axs[2,1].plot(log.s_amp.astype(float), '.', markersize=ms,  color='silver', label='all mutations')
         axs[2,1].plot(bestlog.s_amp.astype(float), '-', linewidth=lw, label='best of the generation')
         axs[2,1].plot(lineage.s_amp.astype(float), '-', linewidth=lw, color='mediumslateblue', label=f'lineage (L={L})')
-        axs[2,1].set(xlabel='Total number of mutations', ylabel='AMP Score')
+        ylabel = 'AMP Probability (MACREL)' if 'hemo_prob' in log.columns else 'AMP Score'
+        axs[2,1].set(xlabel='Total number of mutations', ylabel=ylabel)
         axs[2,1].grid(True, which="both",linestyle='--', linewidth=0.5)
     else:
         axs[2,1].plot(log.num_conts.astype(float), '.', markersize=ms,  color='silver', label='all mutations')

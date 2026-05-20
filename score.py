@@ -1,6 +1,7 @@
 import numpy as np
 import sys, os
 import math
+import pandas as pd
 
 
 def get_aspher(pdb_txt):
@@ -327,3 +328,54 @@ def calculate_samp(sequence):
 
     s_amp = (s_charge * s_hydro * s_amphi) ** (1/3)
     return s_amp
+
+
+def macrel_score_batch(sequences):
+    """
+    Score sequences with MACREL AMP classifier.
+    Returns dict {sequence: (amp_probability, hemolytic_probability)}.
+    Sequences outside MACREL's 10-100 AA range and any failure fall back to
+    (calculate_samp(seq), 0.0).
+    """
+    import subprocess, tempfile, glob as _glob
+    if not sequences:
+        return {}
+    fallback = {seq: (calculate_samp(seq), 0.0) for seq in sequences}
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fasta_path = os.path.join(tmpdir, 'batch.faa')
+            with open(fasta_path, 'w') as fh:
+                for i, seq in enumerate(sequences):
+                    fh.write(f'>seq{i}\n{seq}\n')
+            try:
+                result = subprocess.run(
+                    ['macrel', 'peptides', '--fasta', fasta_path,
+                     '--output', tmpdir, '--force'],
+                    capture_output=True, text=True, timeout=300
+                )
+            except FileNotFoundError:
+                sys.stderr.write(
+                    '  Warning: macrel not installed — '
+                    'conda install -c bioconda macrel\n'
+                    '           falling back to biophysical s_amp\n'
+                )
+                return fallback
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr.strip())
+            pred_files = _glob.glob(os.path.join(tmpdir, '*.prediction.gz'))
+            if not pred_files:
+                raise FileNotFoundError('no .prediction.gz in macrel output')
+            df = pd.read_csv(pred_files[0], sep='\t', comment='#',
+                             compression='gzip')
+            seq_map = {
+                str(row['Sequence']): (float(row['AMP_probability']),
+                                       float(row['Hemolytic_probability']))
+                for _, row in df.iterrows()
+            }
+            return {seq: seq_map.get(seq, fallback[seq]) for seq in sequences}
+    except Exception as e:
+        sys.stderr.write(
+            f'  Warning: MACREL failed ({type(e).__name__}: {e})'
+            ' — using fallback\n'
+        )
+        return fallback
