@@ -51,14 +51,12 @@ def extract_lineage(log):
 
     
     pbar = tqdm(desc='Extracting lineage')
-    i=0
     while not df.empty:
         ndx = return_ancestor(log, ndx)
         df = ndx
         lineage = pd.concat([lineage, df], axis=0)
         ndx = ndx.prev_id.to_string(index=False)
-        i += 1
-        pbar.update(i)
+        pbar.update(1)
     pbar.close()
     lineage = lineage.sort_index()
     r = lineage.tail(1).iloc[-1]

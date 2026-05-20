@@ -53,11 +53,11 @@ def backup_output(outpath):
 
 def create_batched_sequence_dataset(sequences: T.List[T.Tuple[str, str]], max_tokens_per_batch: int = 1524
 ) -> T.Generator[T.Tuple[T.List[str], T.List[str]], None, None]:
-    batch_headers, batch_sequences, num_tokens, num_sequences= [], [], 0, 0 
+    batch_headers, batch_sequences, num_tokens, num_sequences= [], [], 0, 0
     for header, seq in sequences:
         if (len(seq) + num_tokens > max_tokens_per_batch) and num_tokens > 0:
             yield batch_headers, batch_sequences
-            batch_headers, batch_sequences, num_tokens, num_sequences= [], [], 0, 0 
+            batch_headers, batch_sequences, num_tokens, num_sequences= [], [], 0, 0
         batch_headers.append(header)
         batch_sequences.append(seq)
         num_tokens += len(seq)
@@ -65,7 +65,8 @@ def create_batched_sequence_dataset(sequences: T.List[T.Tuple[str, str]], max_to
         if num_sequences > args.pop_size / 2: #TODO test this with args.pop_size / 4 and lartge pop size
            yield batch_headers, batch_sequences
            batch_headers, batch_sequences, num_tokens, num_sequences= [], [], 0, 0
-    yield batch_headers, batch_sequences
+    if batch_headers:
+        yield batch_headers, batch_sequences
 
 def pdbtxt2bbcoord(pdb_txt, chain='A'):
     # can extract this directly from esm output
@@ -182,11 +183,10 @@ def extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_s
         seq = all_seqs[0]
         seq_len = len(seq)
 
-        id_data = meta_id.split('_')
-
-        id = id_data[0]
-        prev_id = id_data[1]
-        mutation = id_data[2]
+        # meta_id format: "{id}_{prev_id}_{mutation}"
+        # prev_id may contain underscores (e.g. "init_seq"), mutation never does
+        id, rest = meta_id.split('_', 1)
+        prev_id, mutation = rest.rsplit('_', 1)
 
         with open(pdb_path + id + '.pdb', 'wb') as f:
             f.write(pdb_txt.encode())
@@ -305,7 +305,6 @@ def fold_evolver(args, model, evolver, logheader, init_gen) -> None:
         new_gen = pd.DataFrame(columns=columns)
         gen_start = time.time()
         generated_sequences = []
-        mutation_collection = []
 
         for prev_id, sequence in zip(init_gen.id, init_gen.sequence):
             seq, mutation_data= evolver.mutate(sequence)
@@ -329,7 +328,6 @@ def fold_evolver(args, model, evolver, logheader, init_gen) -> None:
                     new_gen = pd.concat([new_gen, repeat])
             else:
                 generated_sequences.append((id, seq))
-                mutation_collection.append(mutation_data)
 
         batched_sequences = list(create_batched_sequence_dataset(generated_sequences, args.max_tokens_per_batch))
         if not batched_sequences:
@@ -468,7 +466,6 @@ def inter_fold_evolver(args, model, evolver, logheader, init_gen) -> None:
         new_gen = pd.DataFrame(columns=columns)
         gen_start = time.time()
         generated_sequences = []
-        mutation_collection = []
 
         for prev_id, sequence in zip(init_gen.id, init_gen.sequence):
             seq, mutation_data= evolver.mutate(sequence)
@@ -492,7 +489,6 @@ def inter_fold_evolver(args, model, evolver, logheader, init_gen) -> None:
                     new_gen = pd.concat([new_gen, repeat])
             else:
                 generated_sequences.append((id, seq + seq2))
-                mutation_collection.append(mutation_data)
 
         batched_sequences = list(create_batched_sequence_dataset(generated_sequences, args.max_tokens_per_batch))
         if not batched_sequences:
@@ -542,7 +538,7 @@ def inter_fold_evolver(args, model, evolver, logheader, init_gen) -> None:
             ancestral_memory = pd.concat([ancestral_memory, init_gen])
 
         #select the next generation
-        init_gen = evolver.select(new_gen, init_gen, args.pop_size, args.selection_mode, args.norepeat)
+        init_gen = evolver.select(new_gen, init_gen, args.pop_size, args.selection_mode, args.norepeat, args.beta)
         init_gen.gndx = f'gndx{gen_i}' #assign a new gen index
         init_gen.to_csv(os.path.join(args.outpath, args.log), mode='a', index=False, header=False, sep='\t')
 
