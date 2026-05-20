@@ -264,7 +264,7 @@ global new_gen #this will be modified in the extract_results()
 #================================FOLD_EVOLVER================================# 
  
 
-def fold_evolver(args, model, evolver, logheader, init_gen) -> None: 
+def fold_evolver(args, model, evolver, logheader, init_gen, device) -> None:
 
     os.makedirs(pdb_path, exist_ok=True)
     with open(os.path.join(args.outpath, args.log), 'w') as f:
@@ -335,16 +335,16 @@ def fold_evolver(args, model, evolver, logheader, init_gen) -> None:
 
         print(f"  Gen {gen_i + 1:>4}/{args.num_generations}  │  folding {len(generated_sequences)} sequences...", end='  ', flush=True)
 
+        use_threads = device.type != 'cpu'
         trd = None
         pdbs, ptms, mean_plddts = [], [], []
 
-        #predict data for the new batch (double-buffer pipeline)
         for headers, sequences in batched_sequences:
-            # 1. Start scoring thread for the previous batch on CPU
-            if trd is not None:
+            # 1. Start scoring thread for the previous batch (GPU/MPS only)
+            if use_threads and trd is not None:
                 trd.start()
 
-            # 2. Predict current batch on GPU
+            # 2. Fold current batch
             if torch.backends.mps.is_available():
                 torch.mps.synchronize()
             with torch.no_grad():
@@ -352,18 +352,22 @@ def fold_evolver(args, model, evolver, logheader, init_gen) -> None:
                 configs = [GenerationConfig(track="structure", num_steps=1) for _ in sequences]
                 pdbs, ptms, mean_plddts = esm2data(model.batch_generate(esm_proteins, configs))
 
-            # 3. Wait for previous scoring thread to finish
-            if trd is not None:
+            # 3. Wait for previous scoring thread (GPU/MPS only)
+            if use_threads and trd is not None:
                 trd.join()
 
-            # 4. Run MACREL on current batch (CPU, after GPU fold)
+            # 4. Run MACREL on current batch
             macrel_scores = macrel_score_batch(sequences)
 
-            # 5. Set up scoring thread for current batch
-            trd = threading.Thread(target=extract_results, args=(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_scores))
+            if use_threads:
+                # 5a. GPU/MPS: overlap next fold with this scoring
+                trd = threading.Thread(target=extract_results, args=(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_scores))
+            else:
+                # 5b. CPU: run scoring immediately to avoid competing for cores
+                extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_scores)
 
-        # Score the final batch
-        if trd is not None:
+        # Flush the last thread (GPU/MPS only)
+        if use_threads and trd is not None:
             trd.start()
             trd.join()
 
@@ -415,7 +419,7 @@ def fold_evolver(args, model, evolver, logheader, init_gen) -> None:
 #==================================================================================#
 #================================INTER_FOLD_EVOLVER================================# 
 
-def inter_fold_evolver(args, model, evolver, logheader, init_gen) -> None: 
+def inter_fold_evolver(args, model, evolver, logheader, init_gen, device) -> None:
 
     #evolution of an interacting chain
     NZ_CP011286=":LNIIKLFHGHKYCLIFYVLP" #intergenic region from Yersinia
@@ -496,16 +500,16 @@ def inter_fold_evolver(args, model, evolver, logheader, init_gen) -> None:
 
         print(f"  Gen {gen_i + 1:>4}/{args.num_generations}  │  folding {len(generated_sequences)} sequences...", end='  ', flush=True)
 
+        use_threads = device.type != 'cpu'
         trd = None
         pdbs, ptms, mean_plddts = [], [], []
 
-        #predict data for the new batch (double-buffer pipeline)
         for headers, sequences in batched_sequences:
-            # 1. Start scoring thread for the previous batch on CPU
-            if trd is not None:
+            # 1. Start scoring thread for the previous batch (GPU/MPS only)
+            if use_threads and trd is not None:
                 trd.start()
 
-            # 2. Predict current batch on GPU
+            # 2. Fold current batch
             if torch.backends.mps.is_available():
                 torch.mps.synchronize()
             with torch.no_grad():
@@ -514,19 +518,23 @@ def inter_fold_evolver(args, model, evolver, logheader, init_gen) -> None:
                 configs = [GenerationConfig(track="structure", num_steps=1) for _ in sequences]
                 pdbs, ptms, mean_plddts = esm2data(model.batch_generate(esm_proteins, configs))
 
-            # 3. Wait for previous scoring thread to finish
-            if trd is not None:
+            # 3. Wait for previous scoring thread (GPU/MPS only)
+            if use_threads and trd is not None:
                 trd.join()
 
-            # 4. Run MACREL on chain A only (CPU, after GPU fold)
+            # 4. Run MACREL on chain A only
             chain_a_seqs = [s.split(':')[0] for s in sequences]
             macrel_scores = macrel_score_batch(chain_a_seqs)
 
-            # 5. Set up scoring thread for current batch
-            trd = threading.Thread(target=extract_results, args=(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_scores))
+            if use_threads:
+                # 5a. GPU/MPS: overlap next fold with this scoring
+                trd = threading.Thread(target=extract_results, args=(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_scores))
+            else:
+                # 5b. CPU: run scoring immediately to avoid competing for cores
+                extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_scores)
 
-        # Score the final batch
-        if trd is not None:
+        # Flush the last thread (GPU/MPS only)
+        if use_threads and trd is not None:
             trd.start()
             trd.join()
 
@@ -653,10 +661,9 @@ if __name__ == '__main__':
     parser.add_argument(
             '--max-tokens-per-batch',
             type=int,
-            default=2048, # 5120 works fine with A100
-            help="Maximum number of tokens per gpu forward-pass. This will group shorter sequences together "
-            "for batched prediction. Lowering this can help with out of memory issues, if these occur on "
-            "short sequences."
+            default=512, # 2048+ works fine with A100/V100; 512 is safe for CPU
+            help="Maximum number of tokens per forward-pass. Lower this if you run out of memory. "
+            "Default 512 is conservative and safe for CPU runs."
     )
 
     args = parser.parse_args()
@@ -750,13 +757,17 @@ if __name__ == '__main__':
         device = torch.device("cuda")
     else:
         device = torch.device("cpu")
+        n_threads = os.cpu_count() or 1
+        torch.set_num_threads(n_threads)
+        print(f"\n  Note: running on CPU ({n_threads} threads) — expect slow fold times.")
+        print(f"        Recommended: -ps 4 -ng 20 --max-tokens-per-batch 256")
     model = model.eval().to(device)
     print(f"ready  [{device}]\n")
 
     if args.evolution_mode == "single_chain":
-        fold_evolver(args, model, evolver, logheader, init_gen)
+        fold_evolver(args, model, evolver, logheader, init_gen, device)
     elif args.evolution_mode == "inter_chain":
-        inter_fold_evolver(args, model, evolver, logheader, init_gen)
+        inter_fold_evolver(args, model, evolver, logheader, init_gen, device)
     elif args.evolution_mode == "multimer":
         print("  multimer mode is not yet implemented")
     else:
