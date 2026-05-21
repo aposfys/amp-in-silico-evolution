@@ -6,7 +6,6 @@ import pandas as pd
 import numpy as np
 import typing as T
 import threading
-import gzip
 import time
 from datetime import datetime
 
@@ -140,6 +139,7 @@ def _print_startup(args, evolver, date_now, time_now):
     init_display = args.initial_seq if len(args.initial_seq) <= 40 else args.initial_seq[:40] + '…'
     print(f"  init seq:   {init_display}  (rand_len={args.random_seq_len})")
     print(f"  penalties:  len≥{args.prot_len_penalty}  helix≥{args.helix_len_penalty}  beta≥{args.beta_len_penalty}")
+    print(f"  scoring:    pLDDT×pTM×len_pen×helix_pen×beta_pen×AMP×(1-hemo)×contacts  [MACREL+PFES]")
     print(f"  output:     {args.outpath}/{args.log}")
     print(f"{'═'*_W}\n")
 
@@ -613,7 +613,7 @@ if __name__ == '__main__':
     )
     parser.add_argument(
             '-ed', '--evoldict', type=str,
-            help='population size',
+            help='mutation rate dictionary: flatrates, codonrates, flatoptim, uniprotrates',
             default='flatrates',
     )
     parser.add_argument(
@@ -623,12 +623,12 @@ if __name__ == '__main__':
     )
     parser.add_argument(
             '-hl0', '--helix_len_penalty', type=int,
-            help='population size',
+            help='helix length threshold above which the alpha-helix penalty kicks in',
             default=20,
     )
     parser.add_argument(
             '-bl0', '--beta_len_penalty', type=int,
-            help='population size',
+            help='beta strand length threshold above which the beta-sheet penalty kicks in',
             default=12,
     )
     parser.add_argument(
@@ -654,7 +654,7 @@ if __name__ == '__main__':
     )
     parser.add_argument(
             '--strong_selection_after_n_gen', type=int,
-            help='',
+            help='switch to strong (top-N) selection after this many generations (default 4500 = effectively disabled)',
             default=4500,
     )
     # parser.add_argument(

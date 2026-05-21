@@ -42,7 +42,7 @@ def extract_lineage(log):
     print(f'Processing a trajectory with {traj_len} mutations')
     lineage = log.drop_duplicates('gndx').tail(1)
     df = lineage
-    ndx = df.id.to_string(index=False)
+    ndx = df.id.to_string(index=False).strip()
         
     def return_ancestor(log, node):
         parent = log[log.id == node]
@@ -55,7 +55,7 @@ def extract_lineage(log):
         ndx = return_ancestor(log, ndx)
         df = ndx
         lineage = pd.concat([lineage, df], axis=0)
-        ndx = ndx.prev_id.to_string(index=False)
+        ndx = ndx.prev_id.to_string(index=False).strip()
         pbar.update(1)
     pbar.close()
     lineage = lineage.sort_index()
@@ -80,10 +80,6 @@ def extract_lineage(log):
         print(f"  ss   {ss[i:i+60]}")
     print(f"  {'─'*W}\n")
     return lineage
-
-def extract_sequences(log):
-    fasta  = "fasta"
-    return fasta
 
 #======================= make separate plots =======================#
 def make_plots(log, bestlog, lineage):
@@ -140,7 +136,6 @@ def make_summary_plot(log, bestlog, lineage):
     axs[2,0].plot(lineage.score.astype(float),  '-', linewidth=lw, color='mediumslateblue', label=f'lineage (L={L})')
     axs[2,0].set(xlabel='Total number of mutations', ylabel='Score')
     axs[2,0].grid(True, which="both",linestyle='--', linewidth=0.5)
-    axs[2,0].legend(loc ="lower right")
 
     axs[0,1].plot(log.seq_len.astype(float), '.', markersize=ms,    color='silver', label='all mutations')
     axs[0,1].plot(bestlog.seq_len.astype(float), '-', linewidth=lw, label='best of the generation')
@@ -156,12 +151,18 @@ def make_summary_plot(log, bestlog, lineage):
         axs[1,1].set(xlabel=None, ylabel='iPLDDT')
         axs[1,1].grid(True, which="both",linestyle='--', linewidth=0.5)
         axs[1,1].set_xticklabels([])
-
-    else:     
+    elif 'hemo_prob' in log.columns:
+        axs[1,1].plot(log.hemo_prob.astype(float), '.', markersize=ms,    color='silver', label='all mutations')
+        axs[1,1].plot(bestlog.hemo_prob.astype(float), '-', linewidth=lw, label='best of the generation')
+        axs[1,1].plot(lineage.hemo_prob.astype(float), '-', linewidth=lw, color='mediumslateblue', label=f'lineage (L={L})')
+        axs[1,1].set(xlabel=None, ylabel='Hemolytic Probability')
+        axs[1,1].grid(True, which="both",linestyle='--', linewidth=0.5)
+        axs[1,1].set_xticklabels([])
+    else:
         axs[1,1].plot(log.max_beta_penalty.astype(float), '.', markersize=ms,    color='silver', label='all mutations')
         axs[1,1].plot(bestlog.max_beta_penalty.astype(float), '-', linewidth=lw, label='best of the generation')
         axs[1,1].plot(lineage.max_beta_penalty.astype(float), '-', linewidth=lw, color='mediumslateblue', label=f'lineage (L={L})')
-        axs[1,1].set(xlabel=None, ylabel='SS penalty')
+        axs[1,1].set(xlabel=None, ylabel='Beta-sheet penalty')
         axs[1,1].grid(True, which="both",linestyle='--', linewidth=0.5)
         axs[1,1].set_xticklabels([])
 
@@ -187,8 +188,12 @@ def make_summary_plot(log, bestlog, lineage):
     # Hide x labels and tick labels for top plots and y ticks for right plots.
     #for ax in axs.flat:
     #   ax.label_outer()
+    handles, labels = axs[0,0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, -0.02),
+               ncol=3, fontsize=8)
     fig.tight_layout()
-    fig.savefig(os.path.join(outdir,'Summary.png'), dpi=dpi)
+    fig.subplots_adjust(bottom=0.08)
+    fig.savefig(os.path.join(outdir,'Summary.png'), dpi=dpi, bbox_inches='tight')
 
 
 #======================= seconday structure plot =======================#
