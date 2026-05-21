@@ -169,17 +169,14 @@ def get_inter_nconts(pdb_txt, chainA='A', chainB='B', distance_cutoff=6.0, plddt
                 except ValueError:
                     pass
 
-    if len(cb_data_A) == 0 or len(cb_data_B) == 0: 
+    if len(cb_data_A) == 0 or len(cb_data_B) == 0:
         return(1, 1)
-    else:    
+    else:
         Acoords = np.array([item[1] for item in cb_data_A])
         Bcoords = np.array([item[1] for item in cb_data_B])
-
+        CA_pLDDT_A = np.mean(np.array([item[2] for item in cb_data_A]))
         distances_matrix = np.linalg.norm(Acoords[:, None] - Bcoords, axis=2)
-        contact_map = distances_matrix.copy()
-        contact_map[contact_map <= distance_cutoff] = 1
-        contact_map[contact_map > distance_cutoff] = 0
-        n_contacts = contact_map.sum()
+        n_contacts = (distances_matrix <= distance_cutoff).sum()
         return(n_contacts, round(CA_pLDDT_A * 0.01, 2))
 
 
