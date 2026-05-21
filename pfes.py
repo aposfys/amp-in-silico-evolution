@@ -36,18 +36,20 @@ from esm.models.esm3 import ESM3
 
 
 def backup_output(outpath):
-    print(f'\nSaving output files to {args.outpath}')
-    if os.path.isdir(outpath): 
+    print(f'\nSaving output files to {outpath}')
+    if os.path.isdir(outpath):
+        parent = os.path.dirname(outpath) or '.'
+        base = os.path.basename(outpath)
         backup_list = []
-        last_backup = int()
-        for dir_name in os.listdir():
-            if dir_name.startswith(outpath + '.'):
-                backup=(dir_name.split('.')[-1])
-                if backup.isdigit(): 
-                    backup_list.append(backup)
-                    last_backup = int(max(backup_list))
-        print(f'\n{outpath} already exists, renaming it to {outpath}.{str(last_backup +  1)}')
-        os.replace(outpath, outpath + '.' + str(last_backup +  1))
+        last_backup = 0
+        for dir_name in os.listdir(parent):
+            if dir_name.startswith(base + '.'):
+                suffix = dir_name[len(base) + 1:]
+                if suffix.isdigit():
+                    backup_list.append(int(suffix))
+                    last_backup = max(backup_list)
+        print(f'\n{outpath} already exists, renaming it to {outpath}.{last_backup + 1}')
+        os.replace(outpath, outpath + '.' + str(last_backup + 1))
 
 
 def create_batched_sequence_dataset(sequences: T.List[T.Tuple[str, str]], max_tokens_per_batch: int = 1524
@@ -158,7 +160,7 @@ def _print_gen_summary(gen_i, num_gen, new_gen, elapsed):
     sep += f"  {'─'*5}" if has_hemo else ""
     sep += f"  {'─'*4}  {'─'*14}  {'─'*20}"
     print(sep)
-    for _, row in top.iterrows():
+    for _, row in top.head(10).iterrows():
         seq = str(row.sequence)
         seq_disp = seq[:20] + '…' if len(seq) > 20 else seq
         mut = str(row.mutation)[:14]
@@ -358,7 +360,7 @@ def fold_evolver(args, model, evolver, logheader, init_gen, device) -> None:
                 torch.mps.synchronize()
             with torch.no_grad():
                 esm_proteins = [ESMProtein(sequence=s) for s in sequences]
-                configs = [GenerationConfig(track="structure", num_steps=1) for _ in sequences]
+                configs = [GenerationConfig(track="structure", num_steps=args.num_recycles) for _ in sequences]
                 pdbs, ptms, mean_plddts = esm2data(model.batch_generate(esm_proteins, configs))
 
             # 3. Wait for previous scoring thread (GPU/MPS only)
@@ -429,6 +431,9 @@ def fold_evolver(args, model, evolver, logheader, init_gen, device) -> None:
 #================================INTER_FOLD_EVOLVER================================# 
 
 def inter_fold_evolver(args, model, evolver, logheader, init_gen, device) -> None:
+    if not args.initial_seq2:
+        print("  Error: --initial_seq2 / -iseq2 is required for inter_chain mode.")
+        sys.exit(1)
 
     #evolution of an interacting chain
     NZ_CP011286=":LNIIKLFHGHKYCLIFYVLP" #intergenic region from Yersinia
@@ -524,7 +529,7 @@ def inter_fold_evolver(args, model, evolver, logheader, init_gen, device) -> Non
             with torch.no_grad():
                 linker = "GP" + "G"*30 + "PG"
                 esm_proteins = [ESMProtein(sequence=s.replace(':', linker)) for s in sequences]
-                configs = [GenerationConfig(track="structure", num_steps=1) for _ in sequences]
+                configs = [GenerationConfig(track="structure", num_steps=args.num_recycles) for _ in sequences]
                 pdbs, ptms, mean_plddts = esm2data(model.batch_generate(esm_proteins, configs))
 
             # 3. Wait for previous scoring thread (GPU/MPS only)
@@ -665,7 +670,7 @@ if __name__ == '__main__':
             '--num-recycles',
             type=int,
             default=1,
-            help="Number of recycles to run. Defaults to number used in training (4).",
+            help="Number of ESM3 denoising steps per structure prediction (1=fast, 4-8=higher quality). Default 1.",
     )
     parser.add_argument(
             '--max-tokens-per-batch',
