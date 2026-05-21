@@ -107,93 +107,150 @@ def make_plots(log, bestlog, lineage):
 
 #======================= Summary plot =======================#
 def make_summary_plot(log, bestlog, lineage):
-    
-    ms=0.1
-    lw=1.0
-    dpi=500
 
-    fig, axs = plt.subplots(3,2, figsize=(10, 8))
+    ms  = 0.1
+    lw  = 1.0
+    dpi = 500
 
-    fig.suptitle(None)
+    n_muts = len(log)
+    n_gens = log.gndx.nunique()
+    L      = len(lineage)
 
-    L = len(lineage)
-    axs[0,0].plot(log.mean_plddt.astype(float), '.', markersize=ms,    color='silver', label='all mutations')
-    axs[0,0].plot(bestlog.mean_plddt.astype(float), '-', linewidth=lw, label='best of the generation')
-    axs[0,0].plot(lineage.mean_plddt.astype(float), '-', linewidth=lw, color='mediumslateblue', label=f'lineage (L={L})')
-    axs[0,0].set(xlabel=None, ylabel='mean pLDDT')
-    axs[0,0].grid(True, which="both",linestyle='--', linewidth=0.5)
-    axs[0,0].set_xticklabels([])
+    # Rolling-mean window: ~5 % of total mutations, at least 10 points
+    win = max(10, n_muts // 20)
 
-    axs[1,0].plot(log.ptm.astype(float), '.', markersize=ms,    color='silver', label='all mutations')
-    axs[1,0].plot(bestlog.ptm.astype(float), '-', linewidth=lw, label='best of the generation')
-    axs[1,0].plot(lineage.ptm.astype(float), '-', linewidth=lw, color='mediumslateblue', label=f'lineage (L={L})')
-    axs[1,0].set(xlabel=None, ylabel='pTM')
-    axs[1,0].grid(True, which="both",linestyle='--', linewidth=0.5)
-    axs[1,0].set_xticklabels([])
+    fig, axs = plt.subplots(3, 2, figsize=(10, 8))
+    fig.suptitle(
+        f"PFES run  │  {n_muts:,} sequences evaluated  │  "
+        f"{n_gens} generations  │  lineage length {L}",
+        fontsize=9)
 
-    axs[2,0].plot(log.score.astype(float),  '.', markersize=ms,    color='silver', label='all mutations')
-    axs[2,0].plot(bestlog.score.astype(float), '-', linewidth=lw,  label='best of the generation')
-    axs[2,0].plot(lineage.score.astype(float),  '-', linewidth=lw, color='mediumslateblue', label=f'lineage (L={L})')
-    axs[2,0].set(xlabel='Total number of mutations', ylabel='Score')
-    axs[2,0].grid(True, which="both",linestyle='--', linewidth=0.5)
+    def _panel(ax, col, ylabel, xlabel=None, hide_x=True):
+        v_all  = log[col].astype(float)
+        v_roll = v_all.rolling(win, min_periods=1).mean()
+        v_best = bestlog[col].astype(float)
+        v_lin  = lineage[col].astype(float)
+        ax.plot(v_all,  '.', markersize=ms, color='silver',         label='all evaluated')
+        ax.plot(v_roll, '-', linewidth=0.9, color='steelblue', alpha=0.8,
+                label=f'population rolling mean (w={win})')
+        ax.plot(v_best, '-', linewidth=lw,  color='darkorange',     label='best of generation')
+        ax.plot(v_lin,  '-', linewidth=lw,  color='mediumslateblue',label=f'lineage (L={L})')
+        ax.set(ylabel=ylabel, xlabel=xlabel)
+        ax.grid(True, which='both', linestyle='--', linewidth=0.4)
+        if hide_x:
+            ax.set_xticklabels([])
 
-    axs[0,1].plot(log.seq_len.astype(float), '.', markersize=ms,    color='silver', label='all mutations')
-    axs[0,1].plot(bestlog.seq_len.astype(float), '-', linewidth=lw, label='best of the generation')
-    axs[0,1].plot(lineage.seq_len.astype(float), '-', linewidth=lw, color='mediumslateblue', label=f'lineage (L={L})')
-    axs[0,1].set(xlabel=None, ylabel='Sequence length')
-    axs[0,1].grid(True, which="both",linestyle='--', linewidth=0.5)
-    axs[0,1].set_xticklabels([])
+    _xlabel = 'Evaluated sequences (cumulative)'
 
+    _panel(axs[0, 0], 'mean_plddt',
+           'mean pLDDT\n(ESM3 per-residue confidence, 0–1)')
+    _panel(axs[1, 0], 'ptm',
+           'pTM\n(ESM3 predicted TM-score proxy, 0–1)')
+    _panel(axs[2, 0], 'score',
+           'Fitness score\n(product of all scoring terms)',
+           xlabel=_xlabel, hide_x=False)
+    _panel(axs[0, 1], 'seq_len',
+           'Sequence length\n(amino acids)')
+
+    # Adaptive middle-right panel
     if 'num_inter_conts' in bestlog.columns and bestlog.num_inter_conts.max() != 1:
-        axs[1,1].plot(log.iplddt.astype(float), '.', markersize=ms,    color='silver', label='all mutations')
-        axs[1,1].plot(bestlog.iplddt.astype(float), '-', linewidth=lw, label='best of the generation')
-        axs[1,1].plot(lineage.iplddt.astype(float), '-', linewidth=lw, color='mediumslateblue', label=f'lineage (L={L})')
-        axs[1,1].set(xlabel=None, ylabel='iPLDDT')
-        axs[1,1].grid(True, which="both",linestyle='--', linewidth=0.5)
-        axs[1,1].set_xticklabels([])
+        _panel(axs[1, 1], 'iplddt',
+               'iPLDDT\n(interface pLDDT, 0–1)')
     elif 'hemo_prob' in log.columns:
-        axs[1,1].plot(log.hemo_prob.astype(float), '.', markersize=ms,    color='silver', label='all mutations')
-        axs[1,1].plot(bestlog.hemo_prob.astype(float), '-', linewidth=lw, label='best of the generation')
-        axs[1,1].plot(lineage.hemo_prob.astype(float), '-', linewidth=lw, color='mediumslateblue', label=f'lineage (L={L})')
-        axs[1,1].set(xlabel=None, ylabel='Hemolytic Probability')
-        axs[1,1].grid(True, which="both",linestyle='--', linewidth=0.5)
-        axs[1,1].set_xticklabels([])
+        _panel(axs[1, 1], 'hemo_prob',
+               'Hemolytic probability\n(MACREL, lower = safer, 0–1)')
     else:
-        axs[1,1].plot(log.max_beta_penalty.astype(float), '.', markersize=ms,    color='silver', label='all mutations')
-        axs[1,1].plot(bestlog.max_beta_penalty.astype(float), '-', linewidth=lw, label='best of the generation')
-        axs[1,1].plot(lineage.max_beta_penalty.astype(float), '-', linewidth=lw, color='mediumslateblue', label=f'lineage (L={L})')
-        axs[1,1].set(xlabel=None, ylabel='Beta-sheet penalty')
-        axs[1,1].grid(True, which="both",linestyle='--', linewidth=0.5)
-        axs[1,1].set_xticklabels([])
+        _panel(axs[1, 1], 'max_beta_penalty',
+               'β-sheet penalty\n(sigmoid suppression, 0–1)')
 
+    # Bottom-right panel
     if 's_amp' in log.columns:
-        axs[2,1].plot(log.s_amp.astype(float), '.', markersize=ms,  color='silver', label='all mutations')
-        axs[2,1].plot(bestlog.s_amp.astype(float), '-', linewidth=lw, label='best of the generation')
-        axs[2,1].plot(lineage.s_amp.astype(float), '-', linewidth=lw, color='mediumslateblue', label=f'lineage (L={L})')
-        ylabel = 'AMP Probability (MACREL)' if 'hemo_prob' in log.columns else 'AMP Score'
-        axs[2,1].set(xlabel='Total number of mutations', ylabel=ylabel)
-        axs[2,1].grid(True, which="both",linestyle='--', linewidth=0.5)
+        ylabel = ('AMP probability\n(MACREL ML classifier, 0–1)'
+                  if 'hemo_prob' in log.columns
+                  else 'AMP score\n(biophysical s_amp, 0–1)')
+        _panel(axs[2, 1], 's_amp', ylabel, xlabel=_xlabel, hide_x=False)
     else:
-        axs[2,1].plot(log.num_conts.astype(float), '.', markersize=ms,  color='silver', label='all mutations')
-        axs[2,1].plot(bestlog.num_conts.astype(float), '-', linewidth=lw, label='best of the generation')
-        axs[2,1].plot(lineage.num_conts.astype(float), '-', linewidth=lw, color='mediumslateblue', label=f'lineage (L={L})')
-        axs[2,1].set(xlabel='Total number of mutations', ylabel='Number of contacts')
-        axs[2,1].grid(True, which="both",linestyle='--', linewidth=0.5)
+        _panel(axs[2, 1], 'num_conts',
+               'Intra-chain contacts\n(Cα–Cα ≤ 8 Å)',
+               xlabel=_xlabel, hide_x=False)
 
-    #plt.xticks(rotation=45)
-
-    #for ax in axs.flat:
-    #   ax.set(xlabel='x-label', ylabel='y-label')
-
-    # Hide x labels and tick labels for top plots and y ticks for right plots.
-    #for ax in axs.flat:
-    #   ax.label_outer()
-    handles, labels = axs[0,0].get_legend_handles_labels()
+    handles, labels = axs[0, 0].get_legend_handles_labels()
     fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, -0.02),
-               ncol=3, fontsize=8)
+               ncol=4, fontsize=8)
     fig.tight_layout()
-    fig.subplots_adjust(bottom=0.08)
-    fig.savefig(os.path.join(outdir,'Summary.png'), dpi=dpi, bbox_inches='tight')
+    fig.subplots_adjust(bottom=0.1)
+    fig.savefig(os.path.join(outdir, 'Summary.png'), dpi=dpi, bbox_inches='tight')
+
+
+#======================= Evolution rate plot =======================#
+def make_evolution_plot(log, bestlog, lineage):
+    """
+    Two-panel figure:
+      Top   — per-generation population mean ± 1 std (shaded), best score,
+               and lineage score per generation.
+      Bottom — evolution rate: Δ(best score) per generation as bars,
+               with a rolling mean overlaid.
+    """
+    dpi = 500
+
+    # Extract numeric generation index from gndx string (e.g. 'gndx12' → 12)
+    log2 = log.copy()
+    log2['_gen'] = log2['gndx'].str.extract(r'(\d+)', expand=False).astype(int)
+    gen_stats = log2.groupby('_gen')['score'].agg(
+        mean='mean', std='std', best='max'
+    ).reset_index()
+    gen_stats['std'] = gen_stats['std'].fillna(0)
+    g = gen_stats['_gen'].values
+
+    # Lineage score per generation (max score reached in each generation along the lineage)
+    lin2 = lineage.copy()
+    lin2['_gen'] = lin2['gndx'].str.extract(r'(\d+)', expand=False).astype(int)
+    lin_gen = lin2.groupby('_gen')['score'].max().reset_index()
+
+    # Rolling window for the rate panel
+    rate_win = max(5, len(g) // 20)
+
+    fig, axs = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
+    fig.suptitle(
+        f"PFES evolution rate  │  {log2['_gen'].nunique()} generations  │  "
+        f"pop mean fitness and improvement per generation",
+        fontsize=9)
+
+    # --- Panel 1: population fitness per generation ---
+    ax = axs[0]
+    ax.fill_between(g,
+                    gen_stats['mean'] - gen_stats['std'],
+                    gen_stats['mean'] + gen_stats['std'],
+                    alpha=0.20, color='steelblue',
+                    label='population mean ± 1 std')
+    ax.plot(g, gen_stats['mean'], '-', color='steelblue',       linewidth=1.2,
+            label='population mean score')
+    ax.plot(g, gen_stats['best'], '-', color='darkorange',      linewidth=1.2,
+            label='best score of generation')
+    ax.plot(lin_gen['_gen'], lin_gen['score'],
+            '-', color='mediumslateblue', linewidth=1.0,
+            label=f'lineage score (L={len(lineage)})')
+    ax.set(ylabel='Fitness score\n(per generation)')
+    ax.grid(True, linestyle='--', linewidth=0.4)
+    ax.legend(fontsize=8, loc='upper left')
+
+    # --- Panel 2: evolution rate ---
+    ax2 = axs[1]
+    delta = pd.Series(gen_stats['best']).diff().fillna(0).values
+    bar_colors = ['steelblue' if v >= 0 else 'tomato' for v in delta]
+    ax2.bar(g, delta, color=bar_colors, alpha=0.55, width=0.8,
+            label='Δ best score / generation')
+    ax2.axhline(0, color='black', linewidth=0.5)
+    roll_rate = pd.Series(delta).rolling(rate_win, min_periods=1).mean()
+    ax2.plot(g, roll_rate.values, '-', color='darkorange', linewidth=1.5,
+             label=f'rolling mean ({rate_win} gen)')
+    ax2.set(xlabel='Generation',
+            ylabel='Δ best score / generation\n(positive = improvement)')
+    ax2.grid(True, linestyle='--', linewidth=0.4)
+    ax2.legend(fontsize=8, loc='upper left')
+
+    fig.tight_layout()
+    fig.savefig(os.path.join(outdir, 'Evolution.png'), dpi=dpi, bbox_inches='tight')
 
 
 #======================= seconday structure plot =======================#
@@ -397,6 +454,8 @@ if args.noplots:
     print(f"  ✓ individual column plots")
     make_summary_plot(log, bestlog, lineage)
     print(f"  ✓ summary plot")
+    make_evolution_plot(log, bestlog, lineage)
+    print(f"  ✓ evolution rate plot")
     make_ss_plot(lineage)
     print(f"  ✓ secondary structure plot")
 
