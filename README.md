@@ -1,6 +1,5 @@
 ### This branch evolves antimicrobial peptides using **MACREL** (ML AMP classifier) combined with the full set of PFES structural penalties and ESM3 fold quality. It is the most selective scoring strategy: both AMP fitness and structural quality drive evolution simultaneously.
 
-#### https://peerj.com/articles/10555/
 ---
 
 ### Fitness score
@@ -125,13 +124,3 @@ Produces:
 - `analysis/pfestraj.pdb` — backbone trajectory (open in PyMOL)
 
 Skip plots or trajectory with `--noplots` / `--notraj` respectively.
-
----
-
-### Branch comparison
-
-| Branch | AMP scoring | Structural penalties | External tool |
-|---|---|---|---|
-| `fitness-samp` | Biophysical s_amp | Full (length, SS, contacts) | None |
-| `fitness-macrel` | MACREL ML classifier | None (ESM3 confidence only) | MACREL |
-| **fitness-macrel-pfes** (this) | MACREL ML classifier | Full (length, SS, contacts) | MACREL |
