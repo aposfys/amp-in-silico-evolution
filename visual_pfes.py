@@ -253,6 +253,186 @@ def make_evolution_plot(log, bestlog, lineage):
     fig.savefig(os.path.join(outdir, 'Evolution.png'), dpi=dpi, bbox_inches='tight')
 
 
+#======================= Score component breakdown =======================#
+def make_score_components_plot(log, lineage):
+    """
+    Multi-line chart of every individual scoring term along the best lineage,
+    with the combined score overlaid in black.  Immediately shows which term
+    is the rate-limiting factor at each evolutionary stage.
+    """
+    lin = lineage.reset_index(drop=True)
+    x   = np.arange(len(lin))          # lineage step index
+
+    # Build ordered dict: display_name -> Series of values (all in [0,1])
+    terms = {}
+    if 'mean_plddt' in lin.columns:
+        terms['pLDDT  (ESM3 fold confidence)'] = lin['mean_plddt'].astype(float)
+    if 'ptm' in lin.columns:
+        terms['pTM  (ESM3 TM-score proxy)']    = lin['ptm'].astype(float)
+    if 'prot_len_penalty' in lin.columns:
+        terms['length penalty']                 = lin['prot_len_penalty'].astype(float)
+    if 'max_alpha_penalty' in lin.columns:
+        terms['helix penalty']                  = lin['max_alpha_penalty'].astype(float)
+    if 'max_beta_penalty' in lin.columns:
+        terms['β-sheet penalty']                = lin['max_beta_penalty'].astype(float)
+    if 's_amp' in lin.columns:
+        lbl = 'AMP probability  (MACREL)' if 'hemo_prob' in lin.columns else 'AMP score  (s_amp)'
+        terms[lbl]                              = lin['s_amp'].astype(float)
+    if 'hemo_prob' in lin.columns:
+        terms['(1 − hemolytic prob)']           = (1 - lin['hemo_prob'].astype(float))
+    if 'num_conts' in lin.columns and 'seq_len' in lin.columns:
+        ct = (lin['num_conts'].astype(float) + lin['seq_len'].astype(float)) / lin['seq_len'].astype(float)
+        terms['contact term  ((N_conts + L) / L)'] = ct.clip(upper=1.0)
+
+    if not terms:
+        return
+
+    dpi = 500
+    palette = plt.cm.tab10.colors
+    fig, ax = plt.subplots(figsize=(11, 4))
+
+    for idx, (name, vals) in enumerate(terms.items()):
+        ax.plot(x, vals.values, '-', linewidth=1.4,
+                color=palette[idx % len(palette)], label=name)
+
+    ax.plot(x, lin['score'].astype(float).values,
+            'k-', linewidth=2.0, label='combined score  (product)', zorder=10)
+
+    ax.set(xlabel='Lineage step  (best ancestral sequence at each generation)',
+           ylabel='Term value  [0 – 1]',
+           title='Score component breakdown along the lineage\n'
+                 'combined score = product of all displayed terms')
+    ax.set_ylim(0, 1.08)
+    ax.grid(True, linestyle='--', linewidth=0.4)
+    ax.legend(fontsize=8, loc='upper left',
+              bbox_to_anchor=(1.01, 1), borderaxespad=0)
+    fig.tight_layout()
+    fig.savefig(os.path.join(outdir, 'Score_components.png'), dpi=dpi, bbox_inches='tight')
+
+
+#======================= Fitness landscape =======================#
+def make_fitness_landscape_plot(log, lineage):
+    """
+    2D scatter of structural quality (pLDDT) vs AMP fitness (AMP prob / contacts),
+    every sequence ever evaluated coloured by generation number.
+    The lineage path is overlaid in red with start (green) / end (red star) markers.
+    Shows the evolutionary trajectory through fitness space.
+    """
+    has_amp = 's_amp' in log.columns
+    if has_amp:
+        x_col  = 's_amp'
+        xlabel = ('AMP probability  (MACREL ML classifier, 0–1)'
+                  if 'hemo_prob' in log.columns else 'AMP score  (biophysical s_amp, 0–1)')
+    else:
+        x_col  = 'num_conts'
+        xlabel = 'Intra-chain contacts  (Cα–Cα ≤ 8 Å)'
+
+    log2 = log.copy()
+    log2['_gen'] = log2['gndx'].str.extract(r'(\d+)', expand=False).astype(int)
+
+    dpi = 500
+    fig, ax = plt.subplots(figsize=(7, 5))
+
+    sc = ax.scatter(
+        log2[x_col].astype(float), log2['mean_plddt'].astype(float),
+        c=log2['_gen'], cmap='viridis', s=2, alpha=0.35, linewidths=0,
+        label='all evaluated sequences')
+    cb = fig.colorbar(sc, ax=ax, fraction=0.04, pad=0.04)
+    cb.set_label('Generation', fontsize=8)
+
+    # Lineage path
+    lin_x = lineage[x_col].astype(float).values
+    lin_y = lineage['mean_plddt'].astype(float).values
+    ax.plot(lin_x, lin_y, 'w-', linewidth=2.5, zorder=4)
+    ax.plot(lin_x, lin_y, '-', color='tomato', linewidth=1.5, zorder=5,
+            label=f'lineage path  (L={len(lineage)})')
+    ax.scatter(lin_x[0],  lin_y[0],  color='limegreen', s=80,  zorder=7,
+               marker='o', edgecolors='white', linewidths=0.8, label='lineage start')
+    ax.scatter(lin_x[-1], lin_y[-1], color='tomato',    s=120, zorder=7,
+               marker='*', edgecolors='white', linewidths=0.8, label='lineage end')
+
+    ax.set(xlabel=xlabel,
+           ylabel='mean pLDDT  (ESM3 fold confidence, 0–1)',
+           title='Evolutionary trajectory in fitness space\n'
+                 '(colour = generation number; each point = one evaluated sequence)')
+    ax.legend(fontsize=8, loc='lower right')
+    ax.grid(True, linestyle='--', linewidth=0.3)
+    fig.tight_layout()
+    fig.savefig(os.path.join(outdir, 'Fitness_landscape.png'), dpi=dpi, bbox_inches='tight')
+
+
+#======================= Amino acid composition =======================#
+def make_aa_composition_plot(lineage):
+    """
+    Heatmap of amino acid fractions along the best lineage.
+    Shows how composition drifts over evolutionary time — for AMPs,
+    expect R/K to rise (positive charge) and hydrophobic residues to stabilise.
+    """
+    AAs  = list('ACDEFGHIKLMNPQRSTVWY')
+    seqs = lineage['sequence'].tolist()
+    L    = len(seqs)
+    mat  = np.zeros((20, L))
+    for j, seq in enumerate(seqs):
+        seq = str(seq)
+        if len(seq) == 0:
+            continue
+        for i, aa in enumerate(AAs):
+            mat[i, j] = seq.count(aa) / len(seq)
+
+    dpi = 500
+    fig, ax = plt.subplots(figsize=(11, 4))
+    im = ax.imshow(mat, aspect='auto', origin='lower', cmap='YlOrRd',
+                   interpolation='nearest', vmin=0, vmax=0.35)
+    ax.set_yticks(range(20))
+    ax.set_yticklabels(AAs, fontsize=8)
+    ax.set(xlabel='Lineage step  (best ancestral sequence at each generation)',
+           ylabel='Amino acid',
+           title='Amino acid composition along the lineage\n'
+                 '(fraction of each residue type in the sequence at each step)')
+    cb = fig.colorbar(im, ax=ax, fraction=0.03, pad=0.04)
+    cb.set_label('Fraction', fontsize=8)
+    fig.tight_layout()
+    fig.savefig(os.path.join(outdir, 'AA_composition.png'), dpi=dpi, bbox_inches='tight')
+
+
+#======================= Score distribution per generation =======================#
+def make_score_distribution_plot(log):
+    """
+    Box plots of fitness score distributions per generation.
+    Shows how selection pressure narrows the population over time and
+    whether the whole population is shifting upward or just outliers.
+    Sampled to ≤40 generations for readability.
+    """
+    log2 = log.copy()
+    log2['_gen'] = log2['gndx'].str.extract(r'(\d+)', expand=False).astype(int)
+
+    gen_ids = sorted(log2['_gen'].unique())
+    max_show = 40
+    if len(gen_ids) > max_show:
+        step = max(1, len(gen_ids) // max_show)
+        gen_ids = gen_ids[::step]
+
+    data     = [log2[log2['_gen'] == g]['score'].astype(float).values for g in gen_ids]
+    box_w    = max(0.6, gen_ids[-1] / len(gen_ids) * 0.75) if len(gen_ids) > 1 else 1
+
+    dpi = 500
+    fig, ax = plt.subplots(figsize=(12, 4))
+    bp = ax.boxplot(
+        data, positions=gen_ids, widths=box_w,
+        patch_artist=True, showfliers=False,
+        boxprops=dict(facecolor='steelblue', alpha=0.45, linewidth=0.6),
+        medianprops=dict(color='darkorange', linewidth=1.8),
+        whiskerprops=dict(linewidth=0.7),
+        capprops=dict(linewidth=0.7))
+    ax.set(xlabel='Generation',
+           ylabel='Fitness score  (all evaluated sequences in generation)',
+           title='Score distribution per generation\n'
+                 '(box = IQR, orange bar = median, whiskers = 5–95th percentile)')
+    ax.grid(True, linestyle='--', linewidth=0.3, axis='y')
+    fig.tight_layout()
+    fig.savefig(os.path.join(outdir, 'Score_distribution.png'), dpi=dpi, bbox_inches='tight')
+
+
 #======================= seconday structure plot =======================#
 def make_ss_plot(lineage):
 
@@ -456,6 +636,14 @@ if args.noplots:
     print(f"  ✓ summary plot")
     make_evolution_plot(log, bestlog, lineage)
     print(f"  ✓ evolution rate plot")
+    make_score_components_plot(log, lineage)
+    print(f"  ✓ score components plot")
+    make_fitness_landscape_plot(log, lineage)
+    print(f"  ✓ fitness landscape plot")
+    make_aa_composition_plot(lineage)
+    print(f"  ✓ amino acid composition plot")
+    make_score_distribution_plot(log)
+    print(f"  ✓ score distribution plot")
     make_ss_plot(lineage)
     print(f"  ✓ secondary structure plot")
 
