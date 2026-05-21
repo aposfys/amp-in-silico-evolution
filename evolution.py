@@ -230,7 +230,6 @@ class Evolver():
         elif selection_mode == "weak2":
             weights = np.array((mixed_pop.score) / ((mixed_pop.score).sum()))
             new_init_gen = mixed_pop.sample(n=pop_size, weights=weights, replace=(not norepeat)).sort_values('score', ascending=False)
-            print(weights.sum())
 
         else:
             raise ValueError(f'Unknown selection_mode "{selection_mode}". Valid options: strong, weak, weak2')
