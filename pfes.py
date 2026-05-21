@@ -210,18 +210,27 @@ def extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_s
         # MACREL AMP probability and hemolytic penalty
         s_amp, hemo_prob = macrel_scores.get(seq, (calculate_samp(seq), 0.0))
 
-        score  = np.prod([mean_plddt,           #[0, 1]
-                          ptm,                  #[0, 1]
-                          iplddt,               #[0, 1]
-                          prot_len_penalty,     #[0, 1]
-                          max_beta_penalty,     #[0, 1]
-                          max_alpha_penalty,    #[0, 1]
-                          s_amp,                # MACREL AMP probability
-                          1 - hemo_prob,        # hemolytic penalty
-                          #dG, #~[0, inf]
-                          (num_conts + seq_len) / seq_len,
-                          (num_inter_conts + seq_len) / (seq_len + 1) # change this to sigmod so the number of inter contacts > X would not increase the score
-                          ])
+        if args.evolution_mode == "single_chain":
+            # iplddt and inter-chain contact term are always 1.0 for single chains — omit them.
+            score = np.prod([mean_plddt,
+                             ptm,
+                             prot_len_penalty,
+                             max_beta_penalty,
+                             max_alpha_penalty,
+                             s_amp,
+                             1 - hemo_prob,
+                             (num_conts + seq_len) / seq_len])
+        else:
+            score = np.prod([mean_plddt,
+                             ptm,
+                             iplddt,
+                             prot_len_penalty,
+                             max_beta_penalty,
+                             max_alpha_penalty,
+                             s_amp,
+                             1 - hemo_prob,
+                             (num_conts + seq_len) / seq_len,
+                             (num_inter_conts + seq_len) / (seq_len + 1)])
         #================================SCORING================================#
         #=======================================================================#
 
