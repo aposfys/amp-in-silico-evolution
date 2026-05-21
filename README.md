@@ -80,8 +80,8 @@ Expected output: 5 generations each printing `score`, `pLDDT`, `pTM`, `AMP`, `he
 
 Verify the run succeeded:
 ```bash
-wc -l test_macrel_pfes/progress.log         # should be > 20 lines
-grep "s_amp" test_macrel_pfes/progress.log | head -1  # AMP probabilities should appear
+wc -l test_macrel_pfes/progress.log   # should be > 20 lines
+tail -3 test_macrel_pfes/progress.log  # last 3 scored rows — check s_amp / hemo_prob columns
 ```
 
 ---
@@ -121,10 +121,12 @@ python visual_pfes.py \
 ```
 
 Produces:
-- `analysis/Summary.png` — pLDDT, pTM, score, length, AMP probability trajectories
+- `analysis/Summary.png` — pLDDT, pTM, score, length, hemolytic probability, AMP probability trajectories
 - `analysis/Secondary_structures.png` — secondary structure along the lineage
 - `analysis/lineage.tsv` — best evolutionary path
 - `analysis/pfestraj.pdb` — backbone trajectory (open in PyMOL)
+
+Skip plots or trajectory with `--noplots` / `--notraj` respectively.
 
 ---
 
