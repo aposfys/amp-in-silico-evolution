@@ -1,6 +1,6 @@
-This branch evolves antimicrobial peptides using **MACREL** (ML AMP classifier) combined with the full set of PFES structural penalties and ESM3 fold quality. It is the most selective scoring strategy: both AMP fitness and structural quality drive evolution simultaneously.
+### This branch evolves antimicrobial peptides using **MACREL** (ML AMP classifier) combined with the full set of PFES structural penalties and ESM3 fold quality. It is the most selective scoring strategy: both AMP fitness and structural quality drive evolution simultaneously.
 
-https://peerj.com/articles/10555/
+#### https://peerj.com/articles/10555/
 ---
 
 ### Fitness score
