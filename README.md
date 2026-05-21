@@ -1,8 +1,6 @@
-# PFES: Protein Fold Evolution Simulation
-## Branch: `fitness-macrel-pfes` — MACREL ML AMP Score + Full Structural Penalties + ESM3
-
 This branch evolves antimicrobial peptides using **MACREL** (ML AMP classifier) combined with the full set of PFES structural penalties and ESM3 fold quality. It is the most selective scoring strategy: both AMP fitness and structural quality drive evolution simultaneously.
 
+https://peerj.com/articles/10555/
 ---
 
 ### Fitness score
@@ -137,15 +135,3 @@ Skip plots or trajectory with `--noplots` / `--notraj` respectively.
 | `fitness-samp` | Biophysical s_amp | Full (length, SS, contacts) | None |
 | `fitness-macrel` | MACREL ML classifier | None (ESM3 confidence only) | MACREL |
 | **fitness-macrel-pfes** (this) | MACREL ML classifier | Full (length, SS, contacts) | MACREL |
-
----
-
-### Hardware
-
-- NVIDIA V100 / A100 (GPU, recommended — `--max-tokens-per-batch 2048`)
-- Apple Silicon M-series via MPS
-- CPU (functional but slow — use `-ps 4 -ng 20 --max-tokens-per-batch 256`)
-
-Reference: [In silico evolution of globular protein folds from random sequences](https://www.pnas.org/doi/10.1073/pnas.2509015122)
-
-Extended data: [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.14061036.svg)](https://doi.org/10.5281/zenodo.14061036)
