@@ -145,11 +145,18 @@ def _print_startup(args, evolver, date_now, time_now):
     print(f"  output:     {args.outpath}/{args.log}")
     print(f"{'═'*_W}\n")
 
-def _print_gen_summary(gen_i, num_gen, new_gen, elapsed):
+def _print_gen_summary(gen_i, num_gen, new_gen, elapsed, best_so_far=0.0):
     top = new_gen.sort_values('score', ascending=False)
+    n_total = len(top)
+    this_best = float(top.iloc[0].score) if not top.empty else 0.0
+    pop_mean  = float(top.score.mean()) if not top.empty else 0.0
+    delta = this_best - best_so_far
+    sign = '↑' if delta >= 0 else '↓'
     has_samp = 's_amp' in top.columns
     has_hemo = 'hemo_prob' in top.columns
-    print(f"\n  ── Gen {gen_i + 1}/{num_gen}  ({elapsed:.1f}s) {'─' * (_W - 22)}")
+    print(f"\n  ── Gen {gen_i + 1}/{num_gen}  ({elapsed:.1f}s)  "
+          f"best={this_best:.4f} {sign}{abs(delta):.4f}  pop_mean={pop_mean:.4f}  "
+          f"{'─' * max(2, _W - 55)}")
     hdr = f"  {'score':>6}  {'pLDDT':>6}  {'pTM':>5}"
     hdr += f"  {'AMP':>5}" if has_samp else ""
     hdr += f"  {'hemo':>5}" if has_hemo else ""
@@ -164,12 +171,31 @@ def _print_gen_summary(gen_i, num_gen, new_gen, elapsed):
         seq = str(row.sequence)
         seq_disp = seq[:20] + '…' if len(seq) > 20 else seq
         mut = str(row.mutation)[:14]
-        line = f"  {float(row.score):>6.3f}  {float(row.mean_plddt):>6.3f}  {float(row.ptm):>5.3f}"
+        line = f"  {float(row.score):>6.4f}  {float(row.mean_plddt):>6.3f}  {float(row.ptm):>5.3f}"
         line += f"  {float(row.s_amp):>5.3f}" if has_samp else ""
         line += f"  {float(row.hemo_prob):>5.3f}" if has_hemo else ""
         line += f"  {int(row.seq_len):>4}  {mut:<14}  {seq_disp}"
         print(line)
+    if n_total > 10:
+        print(f"  … {n_total - 10} more sequences not shown")
     print()
+    return this_best
+
+
+def _print_run_summary(log_path, total_time):
+    try:
+        df = pd.read_csv(log_path, sep='\t', comment='#').dropna(subset=['score', 'mean_plddt'])
+        best = df.loc[df.score.idxmax()]
+        n_gens = df.gndx.nunique()
+        print(f"\n  {'═'*_W}")
+        print(f"  Run complete  │  {n_gens} generations  │  {len(df):,} sequences evaluated  │  {total_time:.1f}s")
+        print(f"  Best score:   {best.score:.4f}  │  pLDDT={best.mean_plddt:.3f}  pTM={best.ptm:.3f}", end="")
+        if 's_amp' in best.index:
+            print(f"  AMP={best.s_amp:.3f}  hemo={best.hemo_prob:.3f}", end="")
+        print(f"\n  Best sequence: {best.sequence}  (gen {best.gndx})")
+        print(f"  {'═'*_W}\n")
+    except Exception:
+        pass
 
 
 #==============================================================================================#
@@ -310,6 +336,8 @@ def fold_evolver(args, model, evolver, logheader, init_gen, device) -> None:
     ancestral_memory.to_csv(os.path.join(args.outpath, args.log), mode='a', index=False, header=True, sep='\t') #write header of the progress log
 
     #mutate seqs from init_gen and select the best N seqs for the next generation
+    best_so_far = 0.0
+    run_start = time.time()
     for gen_i in range(args.num_generations):
         n = 0
         global new_gen #this will be modified in the extract_results()
@@ -382,7 +410,8 @@ def fold_evolver(args, model, evolver, logheader, init_gen, device) -> None:
             trd.start()
             trd.join()
 
-        _print_gen_summary(gen_i, args.num_generations, new_gen, time.time() - gen_start)
+        this_best = _print_gen_summary(gen_i, args.num_generations, new_gen, time.time() - gen_start, best_so_far)
+        best_so_far = max(best_so_far, this_best)
 
         if ancestral_memory.empty:
             ancestral_memory = init_gen
@@ -392,7 +421,7 @@ def fold_evolver(args, model, evolver, logheader, init_gen, device) -> None:
         #select the next generation
         init_gen = evolver.select(new_gen, init_gen, args.pop_size, args.selection_mode, args.norepeat, args.beta)
         init_gen.gndx = f'gndx{gen_i}' #assign a new gen index
-        init_gen.to_csv(os.path.join(args.outpath, args.log), mode='a', index=False, header=False, sep='\t')
+        init_gen.dropna(subset=['mean_plddt']).to_csv(os.path.join(args.outpath, args.log), mode='a', index=False, header=False, sep='\t')
 
         #Change the selection with a condition (plddt, ptm)
         if args.strong_selection_by_condition:
@@ -419,8 +448,10 @@ def fold_evolver(args, model, evolver, logheader, init_gen, device) -> None:
                 print(f"\n  ✓ Stopping condition reached at gen {gen_i + 1}  (pLDDT > 0.85, pTM > 0.75)\n")
                 break
 
- 
-#================================FOLD_EVOLVER================================# 
+    _print_run_summary(os.path.join(args.outpath, args.log), time.time() - run_start)
+
+
+#================================FOLD_EVOLVER================================#
 #============================================================================# 
 
 
@@ -476,8 +507,10 @@ def inter_fold_evolver(args, model, evolver, logheader, init_gen, device) -> Non
       
     ancestral_memory = pd.DataFrame(columns=columns)
     ancestral_memory.to_csv(os.path.join(args.outpath, args.log), mode='a', index=False, header=True, sep='\t') #write header of the progress log
-    
+
     #mutate seqs from init_gen and select the best n seqs for the next generation
+    best_so_far = 0.0
+    run_start = time.time()
     for gen_i in range(args.num_generations):
         n = 0
         global new_gen #this will be modified in the extract_results()
@@ -552,7 +585,8 @@ def inter_fold_evolver(args, model, evolver, logheader, init_gen, device) -> Non
             trd.start()
             trd.join()
 
-        _print_gen_summary(gen_i, args.num_generations, new_gen, time.time() - gen_start)
+        this_best = _print_gen_summary(gen_i, args.num_generations, new_gen, time.time() - gen_start, best_so_far)
+        best_so_far = max(best_so_far, this_best)
 
         if ancestral_memory.empty:
             ancestral_memory = init_gen
@@ -562,9 +596,12 @@ def inter_fold_evolver(args, model, evolver, logheader, init_gen, device) -> Non
         #select the next generation
         init_gen = evolver.select(new_gen, init_gen, args.pop_size, args.selection_mode, args.norepeat, args.beta)
         init_gen.gndx = f'gndx{gen_i}' #assign a new gen index
-        init_gen.to_csv(os.path.join(args.outpath, args.log), mode='a', index=False, header=False, sep='\t')
+        init_gen.dropna(subset=['mean_plddt']).to_csv(os.path.join(args.outpath, args.log), mode='a', index=False, header=False, sep='\t')
 
-#================================INTER_FOLD_EVOLVER================================# 
+    _print_run_summary(os.path.join(args.outpath, args.log), time.time() - run_start)
+
+
+#================================INTER_FOLD_EVOLVER================================#
 #==================================================================================#
 
 
