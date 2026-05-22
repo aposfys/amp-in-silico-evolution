@@ -433,6 +433,7 @@ def make_score_distribution_plot(log):
            title='Score distribution per generation\n'
                  '(box = IQR, orange bar = median, whiskers = 5–95th percentile)')
     ax.grid(True, linestyle='--', linewidth=0.3, axis='y')
+    plt.setp(ax.get_xticklabels(), rotation=45, ha='right', fontsize=6)
     fig.tight_layout()
     fig.savefig(os.path.join(outdir, 'Score_distribution.png'), dpi=dpi, bbox_inches='tight')
 
