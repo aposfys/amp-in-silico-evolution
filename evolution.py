@@ -212,24 +212,27 @@ class Evolver():
 
 
 
-    def select(self, input_new_gen, input_init_gen, pop_size:int, selection_mode:str, norepeat:bool, beta = 1): 
-        mixed_pop = pd.concat([input_new_gen, input_init_gen], axis=0, ignore_index=True) 
+    def select(self, input_new_gen, input_init_gen, pop_size:int, selection_mode:str, norepeat:bool, beta = 1):
+        mixed_pop = pd.concat([input_new_gen, input_init_gen], axis=0, ignore_index=True)
 
         e=2.71828182846
 
         if norepeat:
             mixed_pop = mixed_pop.drop_duplicates(subset=['sequence'])
 
+        # Fall back to with-replacement if not enough unique sequences exist
+        use_replace = (not norepeat) or (len(mixed_pop) < pop_size)
+
         if selection_mode == "strong":
             new_init_gen = mixed_pop.sort_values('score', ascending=False).head(pop_size)
 
         elif selection_mode == "weak":
             weights = np.array(e**(beta * mixed_pop.score) / np.array(e**(beta * mixed_pop.score)).sum())
-            new_init_gen = mixed_pop.sample(n=pop_size, weights=weights, replace=(not norepeat)).sort_values('score', ascending=False)
+            new_init_gen = mixed_pop.sample(n=pop_size, weights=weights, replace=use_replace).sort_values('score', ascending=False)
 
         elif selection_mode == "weak2":
             weights = np.array((mixed_pop.score) / ((mixed_pop.score).sum()))
-            new_init_gen = mixed_pop.sample(n=pop_size, weights=weights, replace=(not norepeat)).sort_values('score', ascending=False)
+            new_init_gen = mixed_pop.sample(n=pop_size, weights=weights, replace=use_replace).sort_values('score', ascending=False)
 
         else:
             raise ValueError(f'Unknown selection_mode "{selection_mode}". Valid options: strong, weak, weak2')
