@@ -120,10 +120,10 @@ def make_summary_plot(log, bestlog, lineage):
     # Rolling-mean window: ~5 % of total mutations, at least 10 points
     win = max(10, n_muts // 20)
 
-    fig, axs = plt.subplots(3, 2, figsize=(10, 8))
+    fig, axs = plt.subplots(3, 2, figsize=(12, 8))
     fig.suptitle(
-        f"PFES run  │  {n_muts:,} sequences evaluated  │  "
-        f"{n_gens} generations  │  lineage length {L}",
+        f"Directed evolution summary  │  {n_muts:,} sequences evaluated  │  "
+        f"{n_gens} generations  │  best lineage: {L} steps",
         fontsize=9)
 
     def _panel(ax, col, ylabel, xlabel=None, hide_x=True):
@@ -144,11 +144,11 @@ def make_summary_plot(log, bestlog, lineage):
     _xlabel = 'Evaluated sequences (cumulative)'
 
     _panel(axs[0, 0], 'mean_plddt',
-           'mean pLDDT\n(ESM3 per-residue confidence, 0–1)')
+           'Fold confidence\n(pLDDT, 0–1)')
     _panel(axs[1, 0], 'ptm',
-           'pTM\n(ESM3 predicted TM-score proxy, 0–1)')
+           'Fold quality\n(pTM, 0–1)')
     _panel(axs[2, 0], 'score',
-           'Fitness score\n(product of all scoring terms)',
+           'Combined fitness score\n(0–1)',
            xlabel=_xlabel, hide_x=False)
     _panel(axs[0, 1], 'seq_len',
            'Sequence length\n(amino acids)')
@@ -156,20 +156,20 @@ def make_summary_plot(log, bestlog, lineage):
     # Adaptive middle-right panel
     if 'num_inter_conts' in bestlog.columns and bestlog.num_inter_conts.max() != 1:
         _panel(axs[1, 1], 'iplddt',
-               'iPLDDT\n(interface pLDDT, 0–1)')
+               'Interface pLDDT\n(iPLDDT, 0–1)')
     elif 'hemo_prob' in log.columns:
         _panel(axs[1, 1], 'hemo_prob',
-               'Hemolytic probability\n(MACREL, lower = safer, 0–1)')
+               'Hemolytic risk\n(0–1, lower = safer)')
     else:
         _panel(axs[1, 1], 'max_beta_penalty',
-               'β-sheet penalty\n(sigmoid suppression, 0–1)')
+               'β-sheet penalty\n(0–1)')
 
     # Bottom-right panel
     _amp_col = 'amp_prob' if 'amp_prob' in log.columns else ('s_amp' if 's_amp' in log.columns else None)
     if _amp_col:
-        ylabel = ('AMP probability\n(MACREL ML classifier, 0–1)'
+        ylabel = ('AMP probability\n(MACREL, 0–1)'
                   if 'hemo_prob' in log.columns
-                  else 'AMP score\n(biophysical s_amp, 0–1)')
+                  else 'AMP score\n(biophysical, 0–1)')
         _panel(axs[2, 1], _amp_col, ylabel, xlabel=_xlabel, hide_x=False)
     else:
         _panel(axs[2, 1], 'num_conts',
@@ -214,8 +214,7 @@ def make_evolution_plot(log, bestlog, lineage):
 
     fig, axs = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
     fig.suptitle(
-        f"PFES evolution rate  │  {log2['_gen'].nunique()} generations  │  "
-        f"pop mean fitness and improvement per generation",
+        f"Optimization trajectory  │  {log2['_gen'].nunique()} generations",
         fontsize=9)
 
     # --- Panel 1: population fitness per generation ---
@@ -236,6 +235,16 @@ def make_evolution_plot(log, bestlog, lineage):
     ax.grid(True, linestyle='--', linewidth=0.4)
     ax.legend(fontsize=8, loc='upper left')
 
+    # Mark convergence zone: first generation where rolling improvement drops below 0.005
+    _roll_rate_for_conv = pd.Series(pd.Series(gen_stats['best']).diff().fillna(0).values).rolling(
+        rate_win, min_periods=1).mean()
+    _conv_mask = _roll_rate_for_conv < 0.005
+    if _conv_mask.any():
+        _conv_gen = g[_conv_mask.values][0]
+        ax.axvline(_conv_gen, color='gray', linestyle='--', linewidth=1.0,
+                   label='convergence (improvement < 0.005/gen)')
+        ax.legend(fontsize=8, loc='upper left')
+
     # --- Panel 2: evolution rate ---
     ax2 = axs[1]
     delta = pd.Series(gen_stats['best']).diff().fillna(0).values
@@ -247,7 +256,7 @@ def make_evolution_plot(log, bestlog, lineage):
     ax2.plot(g, roll_rate.values, '-', color='darkorange', linewidth=1.5,
              label=f'rolling mean ({rate_win} gen)')
     ax2.set(xlabel='Generation',
-            ylabel='Δ best score / generation\n(positive = improvement)')
+            ylabel='Score improvement per generation\n(positive = improvement, negative = regression)')
     ax2.grid(True, linestyle='--', linewidth=0.4)
     ax2.legend(fontsize=8, loc='upper left')
 
@@ -282,7 +291,7 @@ def make_score_components_plot(log, lineage):
         lbl = 'AMP probability  (MACREL)' if 'hemo_prob' in lin.columns else 'AMP score  (s_amp)'
         terms[lbl]                              = lin[_amp_col].astype(float)
     if 'hemo_prob' in lin.columns:
-        terms['(1 − hemolytic prob)']           = (1 - lin['hemo_prob'].astype(float))
+        terms['selectivity for bacteria  (1 − hemo risk)'] = (1 - lin['hemo_prob'].astype(float))
     if 'num_conts' in lin.columns and 'seq_len' in lin.columns:
         ct = (lin['num_conts'].astype(float) + lin['seq_len'].astype(float)) / lin['seq_len'].astype(float)
         terms['contact term  ((N_conts + L) / L)'] = ct.clip(upper=1.0)
@@ -301,14 +310,18 @@ def make_score_components_plot(log, lineage):
     ax.plot(x, lin['score'].astype(float).values,
             'k-', linewidth=2.0, label='combined score  (product)', zorder=10)
 
-    ax.set(xlabel='Lineage step  (best ancestral sequence at each generation)',
+    ax.set(xlabel='Lineage step  (each step = one beneficial mutation accepted by selection)',
            ylabel='Term value  [0 – 1]',
-           title='Score component breakdown along the lineage\n'
-                 'combined score = product of all displayed terms')
+           title='Fitness score components along the best evolutionary lineage\n'
+                 'Each term ∈ [0,1]; combined score = their product (black line)')
     ax.set_ylim(0, 1.08)
     ax.grid(True, linestyle='--', linewidth=0.4)
     ax.legend(fontsize=8, loc='upper left',
               bbox_to_anchor=(1.01, 1), borderaxespad=0)
+    fig.text(0.01, -0.04,
+             'Interpretation: a term near 1.0 contributes no penalty; '
+             'a drop marks the rate-limiting constraint at that lineage step',
+             fontsize=7, color='gray', transform=fig.transFigure)
     fig.tight_layout()
     fig.savefig(os.path.join(outdir, 'Score_components.png'), dpi=dpi, bbox_inches='tight')
 
@@ -356,9 +369,9 @@ def make_fitness_landscape_plot(log, lineage):
                marker='*', edgecolors='white', linewidths=0.8, label='lineage end')
 
     ax.set(xlabel=xlabel,
-           ylabel='mean pLDDT  (ESM3 fold confidence, 0–1)',
-           title='Evolutionary trajectory in fitness space\n'
-                 '(colour = generation number; each point = one evaluated sequence)')
+           ylabel='Fold confidence (pLDDT, 0–1)',
+           title='Evolutionary path through sequence space\n'
+                 '(each point = one evaluated sequence; colour = generation)')
     ax.legend(fontsize=8, loc='lower right')
     ax.grid(True, linestyle='--', linewidth=0.3)
     fig.tight_layout()
@@ -389,10 +402,10 @@ def make_aa_composition_plot(lineage):
                    interpolation='nearest', vmin=0, vmax=0.35)
     ax.set_yticks(range(20))
     ax.set_yticklabels(AAs, fontsize=8)
-    ax.set(xlabel='Lineage step  (best ancestral sequence at each generation)',
+    ax.set(xlabel='Lineage step  (each step = one beneficial mutation)',
            ylabel='Amino acid',
-           title='Amino acid composition along the lineage\n'
-                 '(fraction of each residue type in the sequence at each step)')
+           title='Amino acid composition along the best lineage\n'
+                 '(which residue types are enriched by selection over evolutionary time)')
     cb = fig.colorbar(im, ax=ax, fraction=0.03, pad=0.04)
     cb.set_label('Fraction', fontsize=8)
     fig.tight_layout()
@@ -429,9 +442,9 @@ def make_score_distribution_plot(log):
         whiskerprops=dict(linewidth=0.7),
         capprops=dict(linewidth=0.7))
     ax.set(xlabel='Generation',
-           ylabel='Fitness score  (all evaluated sequences in generation)',
-           title='Score distribution per generation\n'
-                 '(box = IQR, orange bar = median, whiskers = 5–95th percentile)')
+           ylabel='Fitness score',
+           title='Population fitness distribution per generation\n'
+                 '(is the whole population improving, or just lucky outliers?)')
     ax.grid(True, linestyle='--', linewidth=0.3, axis='y')
     plt.setp(ax.get_xticklabels(), rotation=45, ha='right', fontsize=6)
     fig.tight_layout()
@@ -496,8 +509,10 @@ def make_ss_plot(lineage):
     plt.figure(figsize=(9, 3), dpi=dpi)
     plt.imshow(sse_digit.T, origin='lower', cmap=cmap,  interpolation='nearest', aspect='auto')
     plt.xticks(ticks, ticks.astype(int))
-    plt.xlabel("Lineage length")
+    plt.xlabel("Lineage step  (each step = one beneficial mutation accepted by selection)")
     plt.ylabel("Residues")
+    plt.title("Secondary structure along the best evolutionary lineage\n"
+              "(how the peptide fold changes with each accepted mutation)", fontsize=9)
 
     custom_lines = [
         Line2D([0], [0], color=cmap(i), lw=4) for i in range(len(color_assign)-1)]
