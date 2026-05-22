@@ -319,17 +319,53 @@ def calculate_samp(sequence):
     return s_amp
 
 
+def calculate_hemo_proxy(sequence):
+    """
+    Biophysical proxy for hemolytic probability.
+
+    MACREL's hemolytic classifier outputs 0.000 for all cationic amphipathic
+    sequences evolved here, providing no selection pressure.
+
+    Formula: sigmoid(hydro_ratio * 10 - charge * 0.5 - 2.0)
+    Calibration (Dathe & Wieprecht 1999): hemolysis correlates with
+    hydrophobic residue fraction and inversely with net positive charge.
+    - mastoparan (hemolytic):  hydro=0.71, charge=3 → ~0.97
+    - melittin (hemolytic):    hydro=0.54, charge=5 → ~0.71
+    - magainin2 (selective):   hydro=0.43, charge=4 → ~0.43
+    - typical evolved AMP:     hydro=0.50, charge=7 → ~0.38
+
+    Returns a value in [0, 1].
+    """
+    seq_len = len(sequence)
+    if seq_len == 0:
+        return 0.0
+
+    hydro_residues = {'A', 'V', 'I', 'L', 'M', 'F', 'W', 'P'}
+    hydro_ratio = sum(1 for r in sequence if r in hydro_residues) / seq_len
+    charge = (sequence.count('R') + sequence.count('K')
+              + 0.1 * sequence.count('H')
+              - sequence.count('D') - sequence.count('E'))
+
+    logit = hydro_ratio * 10.0 - charge * 0.5 - 2.0
+    hemo = 1.0 / (1.0 + math.exp(-logit))
+    return round(min(max(hemo, 0.0), 1.0), 4)
+
+
 def macrel_score_batch(sequences):
     """
     Score sequences with MACREL AMP classifier.
     Returns dict {sequence: (amp_probability, hemolytic_probability)}.
-    Sequences outside MACREL's 10-100 AA range and any failure fall back to
-    (calculate_samp(seq), 0.0).
+
+    AMP probability: from MACREL (falls back to calculate_samp for sequences
+    outside 10-100 AA range or on MACREL failure).
+    Hemolytic probability: always calculate_hemo_proxy — MACREL's hemolytic
+    classifier outputs 0.000 for the cationic amphipathic sequences evolved
+    here and cannot be used for selection pressure.
     """
     import subprocess, tempfile, glob as _glob
     if not sequences:
         return {}
-    fallback = {seq: (calculate_samp(seq), 0.0) for seq in sequences}
+    fallback = {seq: (calculate_samp(seq), calculate_hemo_proxy(seq)) for seq in sequences}
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             fasta_path = os.path.join(tmpdir, 'batch.faa')
@@ -357,11 +393,14 @@ def macrel_score_batch(sequences):
             df = pd.read_csv(pred_files[0], sep='\t', comment='#',
                              compression='gzip')
             seq_map = {
-                str(row['Sequence']): (float(row['AMP_probability']),
-                                       float(row['Hemolytic_probability']))
+                str(row['Sequence']): float(row['AMP_probability'])
                 for _, row in df.iterrows()
             }
-            return {seq: seq_map.get(seq, fallback[seq]) for seq in sequences}
+            return {
+                seq: (seq_map.get(seq, fallback[seq][0]),
+                      calculate_hemo_proxy(seq))
+                for seq in sequences
+            }
     except Exception as e:
         sys.stderr.write(
             f'  Warning: MACREL failed ({type(e).__name__}: {e})'

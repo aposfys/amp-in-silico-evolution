@@ -18,14 +18,14 @@ score = pLDDT × pTM × iPLDDT × len_penalty × helix_penalty × beta_penalty
 
 - **pLDDT / pTM**: ESM3 per-residue confidence and predicted TM-score [0, 1]
 - **AMP_probability**: MACREL prediction that the sequence is antimicrobial [0, 1]
-- **hemolytic_probability**: MACREL prediction of hemolytic activity — penalised as `(1 - hemo)` [0, 1]
+- **hemolytic_probability**: biophysical proxy — `sigmoid(hydro_fraction × 10 − charge × 0.5 − 2)`, penalised as `(1 - hemo)` [0, 1]. MACREL's hemolytic classifier outputs 0.000 for all cationic amphipathic sequences and provides no selection pressure; this proxy (calibrated on mastoparan, melittin, magainin-2) penalises sequences that gain hydrophobicity at the expense of charge.
 - **len_penalty**: discourages sequences longer than `--prot_len_penalty` (default 30 AA)
 - **helix_penalty**: discourages helices longer than `--helix_len_penalty` (default 20 residues)
 - **beta_penalty**: discourages beta strands longer than `--beta_len_penalty` (default 12 residues)
 - **contact_term**: rewards compact folds with more intra-chain contacts
 - **inter_contact_term** / **iPLDDT**: inter-chain contacts and interface pLDDT (inter_chain mode only)
 
-MACREL is valid for 10–100 AA sequences. Sequences outside this range fall back to biophysical `s_amp`.
+MACREL is valid for 10–100 AA sequences. Sequences outside this range fall back to biophysical `s_amp` for the AMP term; the hemolytic term always uses the biophysical proxy.
 
 ---
 
