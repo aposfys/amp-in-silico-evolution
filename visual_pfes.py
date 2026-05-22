@@ -68,9 +68,10 @@ def extract_lineage(log):
     print(f"  pLDDT:    {float(r.mean_plddt):.4f}   │  pTM:    {float(r.ptm):.4f}")
     if float(r.num_inter_conts) > 1:
         print(f"  iPLDDT:   {float(r.iplddt):.4f}   │  InterConts: {int(r.num_inter_conts)}")
-    if 's_amp' in lineage.columns:
+    _amp_col = 'amp_prob' if 'amp_prob' in lineage.columns else ('s_amp' if 's_amp' in lineage.columns else None)
+    if _amp_col:
         hemo_str = f"   │  hemo: {float(r.hemo_prob):.4f}" if 'hemo_prob' in lineage.columns else ""
-        print(f"  AMP prob: {float(r.s_amp):.4f}{hemo_str}")
+        print(f"  AMP prob: {float(r[_amp_col]):.4f}{hemo_str}")
     print(f"  Contacts: {int(r.num_conts)}")
     seq = str(r.sequence)
     ss  = str(r.ss)
@@ -164,11 +165,12 @@ def make_summary_plot(log, bestlog, lineage):
                'β-sheet penalty\n(sigmoid suppression, 0–1)')
 
     # Bottom-right panel
-    if 's_amp' in log.columns:
+    _amp_col = 'amp_prob' if 'amp_prob' in log.columns else ('s_amp' if 's_amp' in log.columns else None)
+    if _amp_col:
         ylabel = ('AMP probability\n(MACREL ML classifier, 0–1)'
                   if 'hemo_prob' in log.columns
                   else 'AMP score\n(biophysical s_amp, 0–1)')
-        _panel(axs[2, 1], 's_amp', ylabel, xlabel=_xlabel, hide_x=False)
+        _panel(axs[2, 1], _amp_col, ylabel, xlabel=_xlabel, hide_x=False)
     else:
         _panel(axs[2, 1], 'num_conts',
                'Intra-chain contacts\n(Cα–Cα ≤ 8 Å)',
@@ -275,9 +277,10 @@ def make_score_components_plot(log, lineage):
         terms['helix penalty']                  = lin['max_alpha_penalty'].astype(float)
     if 'max_beta_penalty' in lin.columns:
         terms['β-sheet penalty']                = lin['max_beta_penalty'].astype(float)
-    if 's_amp' in lin.columns:
+    _amp_col = 'amp_prob' if 'amp_prob' in lin.columns else ('s_amp' if 's_amp' in lin.columns else None)
+    if _amp_col:
         lbl = 'AMP probability  (MACREL)' if 'hemo_prob' in lin.columns else 'AMP score  (s_amp)'
-        terms[lbl]                              = lin['s_amp'].astype(float)
+        terms[lbl]                              = lin[_amp_col].astype(float)
     if 'hemo_prob' in lin.columns:
         terms['(1 − hemolytic prob)']           = (1 - lin['hemo_prob'].astype(float))
     if 'num_conts' in lin.columns and 'seq_len' in lin.columns:
@@ -318,9 +321,10 @@ def make_fitness_landscape_plot(log, lineage):
     The lineage path is overlaid in red with start (green) / end (red star) markers.
     Shows the evolutionary trajectory through fitness space.
     """
-    has_amp = 's_amp' in log.columns
+    _amp_col = 'amp_prob' if 'amp_prob' in log.columns else ('s_amp' if 's_amp' in log.columns else None)
+    has_amp = _amp_col is not None
     if has_amp:
-        x_col  = 's_amp'
+        x_col  = _amp_col
         xlabel = ('AMP probability  (MACREL ML classifier, 0–1)'
                   if 'hemo_prob' in log.columns else 'AMP score  (biophysical s_amp, 0–1)')
     else:
@@ -444,6 +448,8 @@ def make_ss_plot(lineage):
     sse = np.empty((lineage_len, max_seq_len), dtype='U1')
     i=0
     for ss in lineage.ss:
+        if not isinstance(ss, str):
+            ss = ""
         sse[i] = list(ss + "X"*(max_seq_len-len(ss)))
         i+=1
 

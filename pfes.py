@@ -152,7 +152,7 @@ def _print_gen_summary(gen_i, num_gen, new_gen, elapsed, best_so_far=0.0):
     pop_mean  = float(top.score.mean()) if not top.empty else 0.0
     delta = this_best - best_so_far
     sign = '↑' if delta >= 0 else '↓'
-    has_samp = 's_amp' in top.columns
+    has_samp = 'amp_prob' in top.columns or 's_amp' in top.columns
     has_hemo = 'hemo_prob' in top.columns
     print(f"\n  ── Gen {gen_i + 1}/{num_gen}  ({elapsed:.1f}s)  "
           f"best={this_best:.4f} {sign}{abs(delta):.4f}  pop_mean={pop_mean:.4f}  "
@@ -172,7 +172,8 @@ def _print_gen_summary(gen_i, num_gen, new_gen, elapsed, best_so_far=0.0):
         seq_disp = seq[:20] + '…' if len(seq) > 20 else seq
         mut = str(row.mutation)[:14]
         line = f"  {float(row.score):>6.4f}  {float(row.mean_plddt):>6.3f}  {float(row.ptm):>5.3f}"
-        line += f"  {float(row.s_amp):>5.3f}" if has_samp else ""
+        amp_col = 'amp_prob' if 'amp_prob' in row.index else 's_amp'
+        line += f"  {float(row[amp_col]):>5.3f}" if has_samp else ""
         line += f"  {float(row.hemo_prob):>5.3f}" if has_hemo else ""
         line += f"  {int(row.seq_len):>4}  {mut:<14}  {seq_disp}"
         print(line)
@@ -190,8 +191,9 @@ def _print_run_summary(log_path, total_time):
         print(f"\n  {'═'*_W}")
         print(f"  Run complete  │  {n_gens} generations  │  {len(df):,} sequences evaluated  │  {total_time:.1f}s")
         print(f"  Best score:   {best.score:.4f}  │  pLDDT={best.mean_plddt:.3f}  pTM={best.ptm:.3f}", end="")
-        if 's_amp' in best.index:
-            print(f"  AMP={best.s_amp:.3f}  hemo={best.hemo_prob:.3f}", end="")
+        amp_col = 'amp_prob' if 'amp_prob' in best.index else ('s_amp' if 's_amp' in best.index else None)
+        if amp_col:
+            print(f"  AMP={best[amp_col]:.3f}  hemo={best.hemo_prob:.3f}", end="")
         print(f"\n  Best sequence: {best.sequence}  (gen {best.gndx})")
         print(f"  {'═'*_W}\n")
     except Exception:
@@ -236,7 +238,7 @@ def extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_s
         max_beta_penalty = 1 - sigmoid(max_beta, args.beta_len_penalty, 0.6)
 
         # MACREL AMP probability and hemolytic penalty
-        s_amp, hemo_prob = macrel_scores.get(seq, (calculate_samp(seq), 0.0))
+        amp_prob, hemo_prob = macrel_scores.get(seq, (calculate_samp(seq), 0.0))
 
         if args.evolution_mode == "single_chain":
             # iplddt and inter-chain contact term are always 1.0 for single chains — omit them.
@@ -245,7 +247,7 @@ def extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_s
                              prot_len_penalty,
                              max_beta_penalty,
                              max_alpha_penalty,
-                             s_amp,
+                             amp_prob,
                              1 - hemo_prob,
                              (num_conts + seq_len) / seq_len])
         else:
@@ -255,7 +257,7 @@ def extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_s
                              prot_len_penalty,
                              max_beta_penalty,
                              max_alpha_penalty,
-                             s_amp,
+                             amp_prob,
                              1 - hemo_prob,
                              (num_conts + seq_len) / seq_len,
                              (num_inter_conts + seq_len) / (seq_len + 1)])
@@ -277,7 +279,7 @@ def extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_s
                                 #'dG': round(dG, 3),
                                 #'ptm_full': ptm_full,
                                 #'cd' contact_density
-                                's_amp': round(s_amp, 3),
+                                'amp_prob': round(amp_prob, 3),
                                 'hemo_prob': round(hemo_prob, 3),
                                 'score': round(score, 3),
                                 'sequence': seq,
@@ -323,7 +325,7 @@ def fold_evolver(args, model, evolver, logheader, init_gen, device) -> None:
              'num_inter_conts',
              'sel_mode',
              #'dG',
-             's_amp',
+             'amp_prob',
              'hemo_prob',
              'score',
              'sequence',
@@ -497,7 +499,7 @@ def inter_fold_evolver(args, model, evolver, logheader, init_gen, device) -> Non
                'num_inter_conts',
                'sel_mode',
                #'dG',
-               's_amp',
+               'amp_prob',
                'hemo_prob',
                'score',
                'sequence',
