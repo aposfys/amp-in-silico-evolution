@@ -255,8 +255,7 @@ def make_evolution_plot(log, bestlog, lineage):
     roll_rate = pd.Series(delta).rolling(rate_win, min_periods=1).mean()
     ax2.plot(g, roll_rate.values, '-', color='darkorange', linewidth=1.5,
              label=f'rolling mean ({rate_win} gen)')
-    ax2.set(xlabel='Generation',
-            ylabel='Score improvement per generation\n(positive = improvement, negative = regression)')
+    ax2.set(xlabel='Generation', ylabel='Score improvement\nper generation')
     ax2.grid(True, linestyle='--', linewidth=0.4)
     ax2.legend(fontsize=8, loc='upper left')
 
@@ -301,10 +300,10 @@ def make_score_components_plot(log, lineage):
 
     dpi = 500
     palette = plt.cm.tab10.colors
-    fig, ax = plt.subplots(figsize=(11, 4))
+    fig, ax = plt.subplots(figsize=(13, 4))
 
     for idx, (name, vals) in enumerate(terms.items()):
-        ax.plot(x, vals.values, '-', linewidth=1.4,
+        ax.plot(x, vals.values, '-', linewidth=1.6,
                 color=palette[idx % len(palette)], label=name)
 
     ax.plot(x, lin['score'].astype(float).values,
@@ -318,11 +317,11 @@ def make_score_components_plot(log, lineage):
     ax.grid(True, linestyle='--', linewidth=0.4)
     ax.legend(fontsize=8, loc='upper left',
               bbox_to_anchor=(1.01, 1), borderaxespad=0)
-    fig.text(0.01, -0.04,
-             'Interpretation: a term near 1.0 contributes no penalty; '
-             'a drop marks the rate-limiting constraint at that lineage step',
-             fontsize=7, color='gray', transform=fig.transFigure)
     fig.tight_layout()
+    fig.text(0.01, 0.01,
+             'Note: a term near 1.0 = no penalty applied; '
+             'a drop = rate-limiting constraint at that step',
+             fontsize=8, color='dimgray', transform=fig.transFigure)
     fig.savefig(os.path.join(outdir, 'Score_components.png'), dpi=dpi, bbox_inches='tight')
 
 
@@ -352,7 +351,7 @@ def make_fitness_landscape_plot(log, lineage):
 
     sc = ax.scatter(
         log2[x_col].astype(float), log2['mean_plddt'].astype(float),
-        c=log2['_gen'], cmap='viridis', s=2, alpha=0.35, linewidths=0,
+        c=log2['_gen'], cmap='viridis', s=5, alpha=0.5, linewidths=0,
         label='all evaluated sequences')
     cb = fig.colorbar(sc, ax=ax, fraction=0.04, pad=0.04)
     cb.set_label('Generation', fontsize=8)
@@ -444,7 +443,7 @@ def make_score_distribution_plot(log):
     ax.set(xlabel='Generation',
            ylabel='Fitness score',
            title='Population fitness distribution per generation\n'
-                 '(is the whole population improving, or just lucky outliers?)')
+                 'Median (orange) and interquartile range shift upward — the whole population improves, not just outliers')
     ax.grid(True, linestyle='--', linewidth=0.3, axis='y')
     plt.setp(ax.get_xticklabels(), rotation=45, ha='right', fontsize=6)
     fig.tight_layout()
@@ -501,27 +500,25 @@ def make_ss_plot(lineage):
         }
 
     cmap = colors.ListedColormap(color_assign.values())
-    if len(lineage) > 2000:
-        ticks = np.arange(0, len(lineage)+1, 1000)
-    else: 
-        ticks = np.arange(0, len(lineage)+1, 100)
+    n_steps = len(lineage)
+    tick_step = max(1, n_steps // 10)
+    ticks = np.arange(0, n_steps, tick_step)
 
-    plt.figure(figsize=(9, 3), dpi=dpi)
-    plt.imshow(sse_digit.T, origin='lower', cmap=cmap,  interpolation='nearest', aspect='auto')
-    plt.xticks(ticks, ticks.astype(int))
-    plt.xlabel("Lineage step  (each step = one beneficial mutation accepted by selection)")
-    plt.ylabel("Residues")
-    plt.title("Secondary structure along the best evolutionary lineage\n"
-              "(how the peptide fold changes with each accepted mutation)", fontsize=9)
+    fig_ss, ax_ss = plt.subplots(figsize=(11, 3.5), dpi=dpi)
+    ax_ss.imshow(sse_digit.T, origin='lower', cmap=cmap, interpolation='nearest', aspect='auto')
+    ax_ss.set_xticks(ticks)
+    ax_ss.set_xticklabels(ticks.astype(int))
+    ax_ss.set_xlabel("Lineage step  (each step = one beneficial mutation accepted by selection)")
+    ax_ss.set_ylabel("Residue position")
+    ax_ss.set_title("Secondary structure along the best evolutionary lineage", fontsize=10)
 
-    custom_lines = [
-        Line2D([0], [0], color=cmap(i), lw=4) for i in range(len(color_assign)-1)]
-
-    plt.legend(
-        custom_lines, color_assign.keys(), loc="upper center",
-        bbox_to_anchor=(0.5, 1.15), ncol=len(color_assign), fontsize=8)
-    plt.tight_layout()
-    plt.savefig(os.path.join(outdir,'Secondary_structures.png'), dpi=dpi) 
+    custom_lines = [Line2D([0], [0], color=cmap(i), lw=6) for i in range(len(color_assign)-1)]
+    fig_ss.legend(custom_lines, list(color_assign.keys())[:-1],
+                  loc='lower center', bbox_to_anchor=(0.5, -0.08),
+                  ncol=len(color_assign)-1, fontsize=8, frameon=True)
+    fig_ss.tight_layout()
+    fig_ss.subplots_adjust(bottom=0.22)
+    fig_ss.savefig(os.path.join(outdir, 'Secondary_structures.png'), dpi=dpi, bbox_inches='tight')
 
 def backbone_traj(trajlog, pdbdir):
     """
