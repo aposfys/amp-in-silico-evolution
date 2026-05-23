@@ -374,7 +374,7 @@ def macrel_score_batch(sequences):
                     fh.write(f'>seq{i}\n{seq}\n')
             try:
                 clean_env = {k: v for k, v in os.environ.items()
-                             if 'MallocStackLogging' not in k}
+                             if not k.startswith('Malloc')}
                 result = subprocess.run(
                     ['macrel', 'peptides', '--fasta', fasta_path,
                      '--output', tmpdir, '--force'],
