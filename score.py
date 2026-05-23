@@ -373,10 +373,13 @@ def macrel_score_batch(sequences):
                 for i, seq in enumerate(sequences):
                     fh.write(f'>seq{i}\n{seq}\n')
             try:
+                clean_env = {k: v for k, v in os.environ.items()
+                             if 'MallocStackLogging' not in k}
                 result = subprocess.run(
                     ['macrel', 'peptides', '--fasta', fasta_path,
                      '--output', tmpdir, '--force'],
-                    capture_output=True, text=True, timeout=300
+                    capture_output=True, text=True, timeout=300,
+                    env=clean_env
                 )
             except FileNotFoundError:
                 sys.stderr.write(
