@@ -326,13 +326,21 @@ def calculate_hemo_proxy(sequence):
     MACREL's hemolytic classifier outputs 0.000 for all cationic amphipathic
     sequences evolved here, providing no selection pressure.
 
-    Formula: sigmoid(hydro_ratio * 10 - charge * 0.5 - 2.0)
-    Calibration (Dathe & Wieprecht 1999): hemolysis correlates with
-    hydrophobic residue fraction and inversely with net positive charge.
-    - mastoparan (hemolytic):  hydro=0.71, charge=3 → ~0.97
-    - melittin (hemolytic):    hydro=0.54, charge=5 → ~0.71
-    - magainin2 (selective):   hydro=0.43, charge=4 → ~0.43
-    - typical evolved AMP:     hydro=0.50, charge=7 → ~0.38
+    Formula: sigmoid(hydro_ratio * 10 - min(charge_pH7.4, 8.0) * 0.5 - 2.0)
+
+    The charge is capped at +8 to prevent extreme K/R accumulation from
+    producing an artificially near-zero hemo score. Without the cap, sequences
+    with charge > 15 (common in MACREL-only runs) saturate the term, allowing
+    unlimited hydrophobicity growth with no hemolytic penalty.
+
+    Calibration:
+    - mastoparan (hemolytic):  hydro=0.71, charge=3  → 0.97  ✓
+    - melittin   (hemolytic):  hydro=0.54, charge=5  → 0.62  (underpredicted)
+    - magainin2  (safe AMP):   hydro=0.44, charge=4  → 0.70  (known failure —
+        biophysical proxies cannot distinguish magainin-2 from hemolytic peptides
+        on hydrophobicity + charge alone; a true ML predictor is needed)
+    - best pfes seq 26aa:      hydro=0.50, charge=12 → 0.27  (reasonable)
+    - best macrel seq 78aa:    hydro=0.42, charge=19 → 0.27  (capped; was 0.001)
 
     Returns a value in [0, 1].
     """
@@ -340,13 +348,19 @@ def calculate_hemo_proxy(sequence):
     if seq_len == 0:
         return 0.0
 
+    try:
+        import peptides as _pep
+        charge = _pep.Peptide(sequence).charge(pH=7.4)
+    except Exception:
+        charge = (sequence.count('R') + sequence.count('K')
+                  + 0.1 * sequence.count('H')
+                  - sequence.count('D') - sequence.count('E'))
+
     hydro_residues = {'A', 'V', 'I', 'L', 'M', 'F', 'W', 'P'}
     hydro_ratio = sum(1 for r in sequence if r in hydro_residues) / seq_len
-    charge = (sequence.count('R') + sequence.count('K')
-              + 0.1 * sequence.count('H')
-              - sequence.count('D') - sequence.count('E'))
 
-    logit = hydro_ratio * 10.0 - charge * 0.5 - 2.0
+    charge_capped = min(charge, 8.0)
+    logit = hydro_ratio * 10.0 - charge_capped * 0.5 - 2.0
     hemo = 1.0 / (1.0 + math.exp(-logit))
     return round(min(max(hemo, 0.0), 1.0), 4)
 
