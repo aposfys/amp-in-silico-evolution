@@ -1,126 +1,158 @@
-### This branch evolves antimicrobial peptides using **MACREL** (ML AMP classifier) combined with the full set of PFES structural penalties and ESM3 fold quality. It is the most selective scoring strategy: both AMP fitness and structural quality drive evolution simultaneously.
+# PFES — fitness-macrel-pfes
+
+Evolves antimicrobial peptides using **MACREL** (ML AMP classifier), **ESM3** (fold quality), and a full set of **structural penalties** (length, secondary structure, contact density). This is the recommended branch for generating drug candidates — it constrains sequences to therapeutically realistic lengths (~20–30 aa).
+
+## Fitness formula
+
+```
+score = pLDDT × pTM × length_penalty × helix_penalty × beta_penalty
+        × AMP_probability × (1 − hemolytic_probability)
+        × (num_contacts + seq_len) / seq_len
+```
+
+| Term | Source | Notes |
+|------|--------|-------|
+| pLDDT | ESM3 per-residue confidence | [0, 1] |
+| pTM | ESM3 predicted TM-score | [0, 1] |
+| length_penalty | Sigmoid penalty for sequences > target length | [0, 1] |
+| helix_penalty | Penalty for excessive α-helix content | [0, 1] |
+| beta_penalty | Penalty for excessive β-strand content | [0, 1] |
+| AMP_probability | MACREL ML classifier | [0, 1] |
+| 1 − hemolytic_probability | Biophysical proxy (see ANALYSIS.md) | [0, 1] |
+| (contacts + len) / len | Contact density — rewards compact folds | > 1.0 for helices |
+
+The contact density term is the only term that can exceed 1.0. A compact 26 aa helix with ~28 contacts gives (28+26)/26 = **2.08**, which compensates for the structural penalties and keeps short peptides competitive.
 
 ---
 
-### Fitness score
-
-**single_chain mode:**
-```
-score = pLDDT × pTM × len_penalty × helix_penalty × beta_penalty
-        × AMP_probability × (1 - hemolytic_probability) × contact_term
-```
-
-**inter_chain mode:**
-```
-score = pLDDT × pTM × iPLDDT × len_penalty × helix_penalty × beta_penalty
-        × AMP_probability × (1 - hemolytic_probability) × contact_term × inter_contact_term
-```
-
-- **pLDDT / pTM**: ESM3 per-residue confidence and predicted TM-score [0, 1]
-- **AMP_probability**: MACREL prediction that the sequence is antimicrobial [0, 1]
-- **hemolytic_probability**: biophysical proxy — `sigmoid(hydro_fraction × 10 − charge × 0.5 − 2)`, penalised as `(1 - hemo)` [0, 1]. MACREL's hemolytic classifier outputs 0.000 for all cationic amphipathic sequences and provides no selection pressure; this proxy (calibrated on mastoparan, melittin, magainin-2) penalises sequences that gain hydrophobicity at the expense of charge.
-- **len_penalty**: discourages sequences longer than `--prot_len_penalty` (default 30 AA)
-- **helix_penalty**: discourages helices longer than `--helix_len_penalty` (default 20 residues)
-- **beta_penalty**: discourages beta strands longer than `--beta_len_penalty` (default 12 residues)
-- **contact_term**: rewards compact folds with more intra-chain contacts
-- **inter_contact_term** / **iPLDDT**: inter-chain contacts and interface pLDDT (inter_chain mode only)
-
-MACREL is valid for 10–100 AA sequences. Sequences outside this range fall back to biophysical `s_amp` for the AMP term; the hemolytic term always uses the biophysical proxy.
-
----
-
-### Installation
+## Installation
 
 ```bash
-# 1. Clone and enter the repo
-git clone https://github.com/aposfys/PFES-AMPs.git
-cd PFES-AMPs
+# 1. Clone and switch to this branch
+git clone https://github.com/aposfys/PFES-AMPs.git && cd PFES-AMPs
 git checkout fitness-macrel-pfes
 
-# 2. Create environment (conda recommended)
-conda create -n pfes-macrel python=3.10
-conda activate pfes-macrel
+# 2. Create environment
+conda create -n pfes_amps python=3.11
+conda activate pfes_amps
 
-# 3. Install Python dependencies
+# 3. Python dependencies
 pip install -r requirements.txt
+pip install peptides
 
-# 4. Install MACREL (requires Bioconda channel)
+# 4. MACREL (Bioconda)
 conda install -c bioconda -c conda-forge macrel
 
-# 5. Install PSIQUE (secondary structure assignment)
+# 5. PSIQUE (secondary structure)
 pip install git+https://github.com/sahakyanhk/psique
 
-# 6. Set your HuggingFace token (required for ESM3)
-#    Accept the model license at https://huggingface.co/EvolutionaryScale/esm3-sm-open-v1
+# 6. ESM3 access token
+#    Accept the licence at: https://huggingface.co/EvolutionaryScale/esm3-sm-open-v1
 export HF_TOKEN=your_token_here
 ```
 
-Verify MACREL works:
+Verify:
 ```bash
 macrel --version
+python -c "from score import macrel_score_batch; print('OK')"
 ```
 
 ---
 
-### Quick test (CPU, 5 generations)
+## Quick test (3 generations)
 
 ```bash
 python pfes.py \
   -em single_chain -sm weak -b 20 \
-  -ps 4 -ng 5 \
+  -ps 4 -ng 3 \
   --random_seq_len 20 \
   --max-tokens-per-batch 256 \
   -o test_macrel_pfes
 ```
 
-Expected output: 5 generations each printing `score`, `pLDDT`, `pTM`, `AMP`, `hemo`, `len`, `mutation`, `sequence`.
+Each generation prints: `score  pLDDT  pTM  AMP  hemo  len  mutation  sequence`
 
-Verify the run succeeded:
+Scores will be low early on (0.001–0.05 range) — the product of 8 terms is inherently small. They rise as the optimizer finds sequences that satisfy all constraints simultaneously.
+
+Verify:
 ```bash
-wc -l test_macrel_pfes/progress.log   # should be > 20 lines
-tail -3 test_macrel_pfes/progress.log  # last 3 scored rows — check s_amp / hemo_prob columns
+wc -l test_macrel_pfes/progress.log   # > 15 lines
+head -2 test_macrel_pfes/progress.log # check column headers
 ```
 
 ---
 
-### Full AMP evolution run
+## Full production run
 
 ```bash
-# GPU (recommended)
+# Mac MPS / GPU (recommended)
 python pfes.py \
   -em single_chain -sm weak -b 20 \
-  -ps 50 -ng 200 \
+  -ps 100 -ng 500 \
   --random_seq_len 24 \
-  -pl0 30 -hl0 20 -bl0 12 \
   --norepeat \
-  -o amp_macrel_pfes_run
+  -o results_macrel_pfes
 
-# CPU (reduce population and generations)
+# CPU only
 python pfes.py \
   -em single_chain -sm weak -b 20 \
-  -ps 8 -ng 50 \
+  -ps 20 -ng 200 \
   --random_seq_len 24 \
   --max-tokens-per-batch 256 \
-  -o amp_macrel_pfes_cpu
+  -o results_macrel_pfes_cpu
 ```
 
-**Note on scoring pressure:** The product of 8–10 terms all in [0,1] produces scores in the 0.001–0.01 range. Use `-b 20` to `-b 100` for strong Boltzmann selection, or `-sm strong` for deterministic top-N. Default `-b 1` is nearly neutral.
+**Structural penalty flags:**
+
+| Flag | Default | Controls |
+|------|---------|---------|
+| `-pl0 N` | 30 | Max sequence length before penalty (aa) |
+| `-hl0 N` | 20 | Max helix length before penalty (residues) |
+| `-bl0 N` | 12 | Max beta strand length before penalty (residues) |
+
+**Selection flags:**
+
+| Flag | Meaning |
+|------|---------|
+| `-b 20` | Boltzmann β — use 20–50 for meaningful selection |
+| `-sm weak` | Boltzmann-weighted sampling |
+| `-sm strong` | Deterministic top-N selection |
+| `--norepeat` | Reject duplicate sequences |
 
 ---
 
-### Analyse results
+## Output
+
+All results in `<outdir>/progress.log` (tab-separated):
+
+```
+gndx              generation index
+seq_len           length in amino acids
+prot_len_penalty  length penalty [0,1]
+max_alpha_penalty helix fraction penalty [0,1]
+max_beta_penalty  beta fraction penalty [0,1]
+ptm               ESM3 predicted TM-score [0,1]
+mean_plddt        ESM3 per-residue confidence [0,1]
+num_conts         Cα contacts within 8 Å
+amp_prob          AMP probability from MACREL [0,1]
+hemo_prob         hemolytic proxy [0,1]
+score             total fitness score
+sequence          amino acid sequence
+mutation          mutation that produced this sequence
+ss                secondary structure string (PSIQUE)
+```
+
+Structures saved as PDB files under `<outdir>/structures/`.
+
+---
+
+## Analyse results
 
 ```bash
 python visual_pfes.py \
-  -l amp_macrel_pfes_run/progress.log \
-  -s amp_macrel_pfes_run/structures/ \
-  -o amp_macrel_pfes_run/analysis/
+  -l results_macrel_pfes/progress.log \
+  -s results_macrel_pfes/structures/ \
+  -o results_macrel_pfes/analysis/
 ```
 
-Produces:
-- `analysis/Summary.png` — pLDDT, pTM, score, length, hemolytic probability, AMP probability trajectories
-- `analysis/Secondary_structures.png` — secondary structure along the lineage
-- `analysis/lineage.tsv` — best evolutionary path
-- `analysis/pfestraj.pdb` — backbone trajectory (open in PyMOL)
-
-Skip plots or trajectory with `--noplots` / `--notraj` respectively.
+Produces `Summary.png`, `Evolution.png`, `Score_components.png`, `Secondary_structures.png`, `Fitness_landscape.png`, `AA_composition.png`, `lineage.tsv`, `pfestraj.pdb`.
