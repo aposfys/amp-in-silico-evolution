@@ -3,6 +3,12 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/main/VisualStudio.gitignore
 
+# PFES run output — raw structure files (large binaries)
+results_*/structures/
+results_*/analysis/trajpdb/
+results_*/analysis/pfestraj.pdb
+results_*/analysis/.tmp.pdb
+
 # User-specific files
 *.rsuser
 *.suo
@@ -90,6 +96,7 @@ StyleCopReport.xml
 *.tmp_proj
 *_wpftmp.csproj
 *.log
+!results_*/progress.log
 *.tlog
 *.vspscc
 *.vssscc
