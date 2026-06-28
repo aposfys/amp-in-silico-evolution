@@ -630,7 +630,7 @@ if __name__ == '__main__':
             '-iseq', '--initial_seq', type=str,
             help='sequence to initiate with. "random"/"randoms" = random seqs (length via --random_seq_len); '
                  'a literal AA sequence = start from it; '
-                 '"dbaasp[:spec]" = seed from the known-AMP database (spec: random|diverse|low|high|<name>, e.g. dbaasp:magainin_2)',
+                 '"db[:spec]" = seed from the known-AMP database (spec: random|diverse|low|high|<name>, e.g. db:magainin_2; "dbaasp" alias accepted)',
             default='random'
     )
     parser.add_argument(
@@ -785,12 +785,12 @@ if __name__ == '__main__':
                                  'score': [0.001] * args.pop_size})
     #elif args.initial_seq == 'c':
     #    init_gen = pd.read_csv('test.chk', sep='\t')
-    elif args.initial_seq.startswith('dbaasp'):
+    elif args.initial_seq in ('db', 'dbaasp') or args.initial_seq.startswith(('db:', 'dbaasp:')):
         import amp_db
         spec = args.initial_seq.split(':', 1)[1] if ':' in args.initial_seq else 'random'
         seeds = amp_db.seeds_for_population(spec, args.pop_size)
         uniq = sorted({n for n, _ in seeds})
-        print(f"  seeded from DBAASP ({spec}): {', '.join(uniq[:5])}"
+        print(f"  seeded from AMP DB ({spec}): {', '.join(uniq[:5])}"
               f"{' …' if len(uniq) > 5 else ''}")
         init_gen = pd.DataFrame({'id': [f'init_{n}' for n, _ in seeds],
                                  'sequence': [s for _, s in seeds],

@@ -4,12 +4,14 @@ amp_db.py — known antimicrobial peptide (AMP) seed database.
 Lets PFES start evolution from a *real, validated* AMP instead of a random
 sequence or a manually typed one. Use it via the --initial_seq / -iseq flag:
 
-    -iseq dbaasp                 random known AMP (one seed, whole population)
-    -iseq dbaasp:random          same as above
-    -iseq dbaasp:diverse         population seeded with many different AMPs
-    -iseq dbaasp:low             random AMP annotated low-hemolytic (good for
+    -iseq db                     random known AMP (one seed, whole population)
+    -iseq db:random              same as above
+    -iseq db:diverse             population seeded with many different AMPs
+    -iseq db:low                 random AMP annotated low hemolysis-risk (good for
                                  lead optimisation: minimise hemolysis further)
-    -iseq dbaasp:<name>          a specific AMP, e.g. -iseq dbaasp:magainin_2
+    -iseq db:<name>              a specific AMP, e.g. -iseq db:magainin_2
+
+    ("dbaasp" is accepted as an alias for "db" for backward compatibility.)
 
 Where the sequences come from
 -----------------------------
@@ -116,7 +118,7 @@ def parse_fasta(path):
                 name = _norm(parts[0]) if parts else f"amp_{len(records)}"
                 hemo, note_tokens = "unknown", []
                 for tok in parts[1:]:
-                    m = re.match(r"hemolytic=(\w+)", tok, re.I)
+                    m = re.match(r"(?:hemo_risk|hemolytic)=(\w+)", tok, re.I)
                     if m:
                         hemo = m.group(1).lower()
                     else:
@@ -258,9 +260,48 @@ def save_fasta(records, path):
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     with open(path, "w") as fh:
         for d in records:
-            fh.write(f">{d['name']} hemolytic={d.get('hemolytic','unknown')} "
+            fh.write(f">{d['name']} hemo_risk={d.get('hemolytic','unknown')} "
                      f"{d.get('note','')}\n{d['seq']}\n")
     return path
+
+
+# Hemolysis-risk tiers derived from a predicted hemolytic probability in [0, 1].
+HEMO_LOW_MAX = 0.30    # p < 0.30  -> low risk
+HEMO_HIGH_MIN = 0.60   # p > 0.60  -> high risk; in between -> moderate
+
+
+def risk_tier(prob):
+    if prob is None:
+        return "unknown"
+    if prob < HEMO_LOW_MAX:
+        return "low"
+    if prob > HEMO_HIGH_MIN:
+        return "high"
+    return "moderate"
+
+
+def annotate_hemo(records, batch=2000):
+    """Compute the hemolysis-risk attribute for each record by scoring its
+    sequence with HemoPI2 (via score.hemopi2_score_batch, which falls back to the
+    biophysical proxy if HemoPI2 is not installed). Sets record['hemolytic'] to
+    'low'/'moderate'/'high' and record['hemo_prob'] to the raw probability.
+    Returns the records (and prints a tier distribution)."""
+    from score import hemopi2_score_batch  # lazy import (pulls numpy/pandas)
+    seqs = [r["seq"] for r in records]
+    scores = {}
+    for i in range(0, len(seqs), batch):
+        chunk = seqs[i:i + batch]
+        scores.update(hemopi2_score_batch(chunk))
+        sys.stderr.write(f"  amp_db: hemolysis-scored {min(i + batch, len(seqs))}"
+                         f"/{len(seqs)}\n")
+    dist = {"low": 0, "moderate": 0, "high": 0, "unknown": 0}
+    for r in records:
+        p = scores.get(r["seq"])
+        r["hemo_prob"] = p
+        r["hemolytic"] = risk_tier(p)
+        dist[r["hemolytic"]] += 1
+    sys.stderr.write(f"  amp_db: hemo_risk distribution {dist}\n")
+    return records
 
 
 def import_file(path):
@@ -403,13 +444,33 @@ def _main(argv=None):
                     help="bulk source for --fetch (default: dramp, a reliable static download)")
     ap.add_argument("--import", dest="import_path", metavar="FILE",
                     help="build the cache from a downloaded export (FASTA/TSV/CSV)")
+    ap.add_argument("--annotate-hemo", action="store_true",
+                    help="(re)compute the hemo_risk attribute for the cache and save it")
+    ap.add_argument("--no-annotate", action="store_true",
+                    help="skip hemolysis annotation when fetching/importing")
     ap.add_argument("--out", default=CACHE_PATH, help=f"cache path (default {CACHE_PATH})")
     ap.add_argument("--id-end", type=int, default=20000, help="max peptide id to scan (--fetch --source dbaasp)")
     ap.add_argument("--list", action="store_true", help="list the active pool and exit")
     args = ap.parse_args(argv)
 
+    def _maybe_annotate(recs):
+        if not args.no_annotate:
+            sys.stderr.write(f"  amp_db: scoring hemolysis risk for {len(recs)} AMPs"
+                             " (HemoPI2 if installed, else biophysical proxy)…\n")
+            annotate_hemo(recs)
+        return recs
+
+    if args.annotate_hemo:
+        src = args.out if os.path.isfile(args.out) else CACHE_PATH
+        if not os.path.isfile(src):
+            print(f"no cache at {src} — run --fetch or --import first")
+            return
+        recs = annotate_hemo(parse_fasta(src))
+        save_fasta(recs, args.out)
+        print(f"annotated {len(recs)} AMPs with hemo_risk -> {args.out}")
+        return
     if args.import_path:
-        recs = import_file(args.import_path)
+        recs = _maybe_annotate(import_file(args.import_path))
         save_fasta(recs, args.out)
         print(f"imported {len(recs)} AMPs -> {args.out}")
         return
@@ -419,6 +480,7 @@ def _main(argv=None):
             print(f"fetch from {args.source} returned nothing — "
                   "try --import with a downloaded export")
             return
+        _maybe_annotate(recs)
         save_fasta(recs, args.out)
         print(f"fetched {len(recs)} AMPs from {args.source} -> {args.out}")
         return
