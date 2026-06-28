@@ -403,3 +403,6 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+
+# PFES AMP seed cache (built via `python amp_db.py --fetch/--import`)
+/data/dbaasp.faa
