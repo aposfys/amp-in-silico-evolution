@@ -365,21 +365,111 @@ def calculate_hemo_proxy(sequence):
     return round(min(max(hemo, 0.0), 1.0), 4)
 
 
+def hemopi2_score_batch(sequences, model=1):
+    """
+    Predict hemolytic probability with HemoPI2 (Raghava lab, 2024).
+    Returns dict {sequence: hemo_probability in [0, 1]}, higher = more hemolytic.
+
+    HemoPI2 replaces the old biophysical calculate_hemo_proxy. It is an ML model
+    trained on 1,926 experimentally validated hemolytic peptides (AUROC ~0.92)
+    and produces a real, varying signal on the cationic amphipathic peptides PFES
+    evolves — unlike MACREL's hemolytic RF, which saturates to ~0.000 out of its
+    training distribution and gave no selection gradient.
+
+    Install:  pip install hemopi2
+    CLI:      hemopi2_classification -i in.fa -o out.csv -m {1=RF,2=RF+MERCI,3=ESM2,4=ESM+MERCI}
+    model=1 (Random Forest) is used here: fastest and dependency-light (no Perl/MERCI),
+    appropriate for per-generation scoring inside the evolutionary loop. Switch to
+    model=3 (ESM2-t6) for slightly higher accuracy at extra cost.
+
+    Falls back per-sequence to calculate_hemo_proxy if HemoPI2 is not installed
+    or fails.
+    """
+    import subprocess, tempfile
+    fallback = {seq: calculate_hemo_proxy(seq) for seq in sequences}
+    if not sequences:
+        return {}
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fasta_path = os.path.join(tmpdir, 'hemo_in.fa')
+            out_path = os.path.join(tmpdir, 'hemo_out.csv')
+            order = []
+            with open(fasta_path, 'w') as fh:
+                for i, seq in enumerate(sequences):
+                    fh.write(f'>seq{i}\n{seq}\n')
+                    order.append(seq)
+            try:
+                result = subprocess.run(
+                    ['hemopi2_classification', '-i', fasta_path,
+                     '-o', out_path, '-m', str(model), '-j', '1',
+                     '-wd', tmpdir],
+                    capture_output=True, text=True, timeout=600,
+                )
+            except FileNotFoundError:
+                sys.stderr.write(
+                    '  Warning: hemopi2 not installed — pip install hemopi2\n'
+                    '           falling back to biophysical hemo proxy\n'
+                )
+                return fallback
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr.strip() or result.stdout.strip())
+            if not os.path.isfile(out_path):
+                raise FileNotFoundError(f'no hemopi2 output at {out_path}')
+
+            df = pd.read_csv(out_path)
+            # HemoPI2 output column names are not contractually fixed across
+            # versions, so locate the hemolytic score robustly: prefer a column
+            # whose name mentions score/prob whose values fall in [0, 1], else
+            # the first such numeric column.
+            score_col = None
+            for prefer_named in (True, False):
+                for col in df.columns:
+                    lc = str(col).strip().lower()
+                    if prefer_named and not ('score' in lc or 'prob' in lc):
+                        continue
+                    vals = pd.to_numeric(df[col], errors='coerce')
+                    if vals.notna().mean() > 0.8 and vals.dropna().between(0, 1).mean() > 0.8:
+                        score_col = col
+                        break
+                if score_col is not None:
+                    break
+            if score_col is None:
+                raise ValueError(f'no hemolytic score column in {list(df.columns)}')
+
+            scores = pd.to_numeric(df[score_col], errors='coerce').tolist()
+            if len(scores) != len(order):
+                raise ValueError(
+                    f'hemopi2 returned {len(scores)} rows for {len(order)} sequences')
+            return {
+                seq: (round(float(min(max(s, 0.0), 1.0)), 4)
+                      if pd.notna(s) else fallback[seq])
+                for seq, s in zip(order, scores)
+            }
+    except Exception as e:
+        sys.stderr.write(
+            f'  Warning: HemoPI2 failed ({type(e).__name__}: {e})'
+            ' — using biophysical hemo proxy fallback\n'
+        )
+        return fallback
+
+
 def macrel_score_batch(sequences):
     """
-    Score sequences with MACREL AMP classifier.
+    Score sequences for AMP activity (MACREL) and hemolysis (HemoPI2).
     Returns dict {sequence: (amp_probability, hemolytic_probability)}.
 
     AMP probability: from MACREL (falls back to calculate_samp for sequences
     outside 10-100 AA range or on MACREL failure).
-    Hemolytic probability: always calculate_hemo_proxy — MACREL's hemolytic
-    classifier outputs 0.000 for the cationic amphipathic sequences evolved
-    here and cannot be used for selection pressure.
+    Hemolytic probability: from HemoPI2 (falls back to calculate_hemo_proxy if
+    HemoPI2 is unavailable). HemoPI2 replaces MACREL's own hemolytic output,
+    which saturated to 0.000 on the evolved sequences and gave no gradient.
     """
     import subprocess, tempfile, glob as _glob
     if not sequences:
         return {}
-    fallback = {seq: (calculate_samp(seq), calculate_hemo_proxy(seq)) for seq in sequences}
+    # Hemolytic probability for the whole batch (one HemoPI2 call).
+    hemo_scores = hemopi2_score_batch(sequences)
+    fallback = {seq: (calculate_samp(seq), hemo_scores[seq]) for seq in sequences}
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             fasta_path = os.path.join(tmpdir, 'batch.faa')
@@ -415,7 +505,7 @@ def macrel_score_batch(sequences):
             }
             return {
                 seq: (seq_map.get(seq, fallback[seq][0]),
-                      calculate_hemo_proxy(seq))
+                      hemo_scores[seq])
                 for seq in sequences
             }
     except Exception as e:

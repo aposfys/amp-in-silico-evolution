@@ -28,7 +28,7 @@ except ImportError:
     pass
 
 from evolution import Evolver
-from score import get_nconts, cbiplddt, calculate_samp, macrel_score_batch
+from score import get_nconts, cbiplddt, calculate_samp, calculate_hemo_proxy, macrel_score_batch
 from psique import pypsique
 
 from esm.sdk.api import ESMProtein, GenerationConfig
@@ -141,7 +141,7 @@ def _print_startup(args, evolver, date_now, time_now):
     init_display = args.initial_seq if len(args.initial_seq) <= 40 else args.initial_seq[:40] + '…'
     print(f"  init seq:   {init_display}  (rand_len={args.random_seq_len})")
     print(f"  penalties:  len≥{args.prot_len_penalty}  helix≥{args.helix_len_penalty}  beta≥{args.beta_len_penalty}")
-    print(f"  scoring:    pLDDT×pTM×len_pen×helix_pen×beta_pen×AMP×(1-hemo)×contacts  [MACREL+PFES]")
+    print(f"  scoring:    pLDDT×pTM×len_pen×helix_pen×beta_pen×AMP×(1-hemo)×contacts  [MACREL AMP + HemoPI2 hemo + PFES]")
     print(f"  output:     {args.outpath}/{args.log}")
     print(f"{'═'*_W}\n")
 
@@ -237,8 +237,8 @@ def extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_s
         max_alpha_penalty = 1 - sigmoid(max_helix, args.helix_len_penalty, 0.5)
         max_beta_penalty = 1 - sigmoid(max_beta, args.beta_len_penalty, 0.6)
 
-        # MACREL AMP probability and hemolytic penalty
-        amp_prob, hemo_prob = macrel_scores.get(seq, (calculate_samp(seq), 0.0))
+        # MACREL AMP probability + HemoPI2 hemolytic penalty
+        amp_prob, hemo_prob = macrel_scores.get(seq, (calculate_samp(seq), calculate_hemo_proxy(seq)))
 
         if args.evolution_mode == "single_chain":
             # iplddt and inter-chain contact term are always 1.0 for single chains — omit them.

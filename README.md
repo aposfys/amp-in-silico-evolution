@@ -1,6 +1,8 @@
-# PFES — fitness-macrel-pfes
+# PFES — fitness-macrel-structured
 
-Evolves antimicrobial peptides using **MACREL** (ML AMP classifier), **ESM3** (fold quality), and a full set of **structural penalties** (length, secondary structure, contact density). This is the recommended branch for generating drug candidates — it constrains sequences to therapeutically realistic lengths (~20–30 aa).
+Evolves antimicrobial peptides using **MACREL** (ML AMP classifier), **HemoPI2** (ML hemolysis predictor), **ESM3** (fold quality), and a full set of **structural penalties** (length, secondary structure, contact density). This is the recommended branch for generating drug candidates — it constrains sequences to therapeutically realistic lengths (~20–30 aa).
+
+> Renamed from `fitness-macrel-pfes` (both branches run on the PFES framework; the suffix now reflects that this one applies the full PFES **structural** fitness terms). The length-unconstrained variant is `fitness-macrel-foldonly`.
 
 ## Fitness formula
 
@@ -18,7 +20,7 @@ score = pLDDT × pTM × length_penalty × helix_penalty × beta_penalty
 | helix_penalty | Penalty for excessive α-helix content | [0, 1] |
 | beta_penalty | Penalty for excessive β-strand content | [0, 1] |
 | AMP_probability | MACREL ML classifier | [0, 1] |
-| 1 − hemolytic_probability | Biophysical proxy (see ANALYSIS.md) | [0, 1] |
+| 1 − hemolytic_probability | HemoPI2 ML predictor (falls back to biophysical proxy) | [0, 1] |
 | (contacts + len) / len | Contact density — rewards compact folds | > 1.0 for helices |
 
 The contact density term is the only term that can exceed 1.0. A compact 26 aa helix with ~28 contacts gives (28+26)/26 = **2.08**, which compensates for the structural penalties and keeps short peptides competitive.
@@ -30,15 +32,14 @@ The contact density term is the only term that can exceed 1.0. A compact 26 aa h
 ```bash
 # 1. Clone and switch to this branch
 git clone https://github.com/aposfys/PFES-AMPs.git && cd PFES-AMPs
-git checkout fitness-macrel-pfes
+git checkout fitness-macrel-structured
 
 # 2. Create environment
 conda create -n pfes_amps python=3.11
 conda activate pfes_amps
 
-# 3. Python dependencies
+# 3. Python dependencies (includes peptides + hemopi2)
 pip install -r requirements.txt
-pip install peptides
 
 # 4. MACREL (Bioconda)
 conda install -c bioconda -c conda-forge macrel
