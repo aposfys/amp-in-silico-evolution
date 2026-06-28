@@ -20,16 +20,19 @@ There are two layers:
 
   2. A local cache FASTA (default: <repo>/data/dbaasp.faa) holding the *full*
      DBAASP set. When that file exists, seeding draws from it (thousands of
-     peptides). Build it once with either:
+     peptides). Build it once, e.g.:
 
-         python amp_db.py --fetch                  # DBAASP REST API
-         python amp_db.py --import dbaasp_export.fasta   # a file you downloaded
+         python amp_db.py --fetch                  # DRAMP (default; ~11k peptides,
+                                                   #   one static download, no API gate)
+         python amp_db.py --fetch --source dbaasp  # DBAASP REST API (often gated)
+         python amp_db.py --import export.fasta     # any FASTA/TSV/CSV you downloaded
 
-     (Use --import if the API is rate-limited/blocked on your network: export
-     the peptide list from https://dbaasp.org as FASTA or TSV, then import it.)
+     DRAMP is the default because its bulk set is a single reliable file download,
+     unlike DBAASP's rate-limited/User-Agent-gated API. Use --import for a DBAASP
+     website export (FASTA or TSV) if you specifically want DBAASP records.
 
-DBAASP citation: Pirtskhalava et al., Nucleic Acids Res. 2021 (DBAASP v3),
-https://dbaasp.org
+Citations: DRAMP — Shi et al., Nucleic Acids Res. 2022 (http://dramp.cpu-bioinfor.org);
+DBAASP — Pirtskhalava et al., Nucleic Acids Res. 2021 (https://dbaasp.org).
 """
 
 import os
@@ -69,6 +72,10 @@ CACHE_PATH = os.environ.get(
     "PFES_AMP_DB",
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "dbaasp.faa"),
 )
+
+# DRAMP general-AMP set: a single static FASTA (~11k peptides), no API gate.
+DRAMP_GENERAL_FASTA = ("http://dramp.cpu-bioinfor.org/downloads/"
+                       "download_data/DRAMP3.0_new/general_amps.fasta")
 
 _AA = set("ACDEFGHIKLMNPQRSTVWY")
 _pool_cache = None  # memoised loaded pool
@@ -294,6 +301,37 @@ def import_file(path):
     return recs
 
 
+def fetch_dramp(url=DRAMP_GENERAL_FASTA, timeout=120):
+    """Download the DRAMP general-AMP set (one static FASTA, ~11k peptides) and
+    return parsed records. This is the recommended bulk source: a single reliable
+    file download with no gated API. DRAMP: Shi et al., Nucleic Acids Res. 2022.
+    """
+    import tempfile
+    from urllib.request import urlopen, Request
+    headers = {"User-Agent": "Mozilla/5.0",
+               "Referer": "http://dramp.cpu-bioinfor.org/downloads/"}
+    try:
+        with urlopen(Request(url, headers=headers), timeout=timeout) as resp:
+            data = resp.read().decode("utf-8", "replace")
+    except Exception as e:
+        sys.stderr.write(f"  amp_db: DRAMP fetch failed ({type(e).__name__}: {e})\n")
+        return []
+    if not data.lstrip().startswith(">"):
+        sys.stderr.write("  amp_db: DRAMP response was not FASTA (download URL may "
+                         "have changed) — try --import with a manual download\n")
+        return []
+    tmp = tempfile.NamedTemporaryFile("w", suffix=".fasta", delete=False)
+    try:
+        tmp.write(data)
+        tmp.close()
+        recs = parse_fasta(tmp.name)
+    finally:
+        os.unlink(tmp.name)
+    for r in recs:
+        r["note"] = "DRAMP general"
+    return recs
+
+
 def fetch_dbaasp(id_start=1, id_end=20000, delay=0.05, timeout=30, max_fail=200):
     """Best-effort live fetch from the DBAASP REST API by iterating peptide cards.
 
@@ -360,11 +398,13 @@ def _main(argv=None):
     import argparse
     ap = argparse.ArgumentParser(description="AMP seed database utilities")
     ap.add_argument("--fetch", action="store_true",
-                    help="fetch the full DBAASP set from the API into the cache")
+                    help="download a bulk AMP set into the cache (see --source)")
+    ap.add_argument("--source", choices=["dramp", "dbaasp"], default="dramp",
+                    help="bulk source for --fetch (default: dramp, a reliable static download)")
     ap.add_argument("--import", dest="import_path", metavar="FILE",
-                    help="build the cache from a downloaded DBAASP export (FASTA/TSV/CSV)")
+                    help="build the cache from a downloaded export (FASTA/TSV/CSV)")
     ap.add_argument("--out", default=CACHE_PATH, help=f"cache path (default {CACHE_PATH})")
-    ap.add_argument("--id-end", type=int, default=20000, help="max peptide id to scan (--fetch)")
+    ap.add_argument("--id-end", type=int, default=20000, help="max peptide id to scan (--fetch --source dbaasp)")
     ap.add_argument("--list", action="store_true", help="list the active pool and exit")
     args = ap.parse_args(argv)
 
@@ -374,12 +414,13 @@ def _main(argv=None):
         print(f"imported {len(recs)} AMPs -> {args.out}")
         return
     if args.fetch:
-        recs = fetch_dbaasp(id_end=args.id_end)
+        recs = fetch_dramp() if args.source == "dramp" else fetch_dbaasp(id_end=args.id_end)
         if not recs:
-            print("fetch returned nothing — try --import with a downloaded export")
+            print(f"fetch from {args.source} returned nothing — "
+                  "try --import with a downloaded export")
             return
         save_fasta(recs, args.out)
-        print(f"fetched {len(recs)} AMPs -> {args.out}")
+        print(f"fetched {len(recs)} AMPs from {args.source} -> {args.out}")
         return
 
     pool = load_pool()
