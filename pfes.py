@@ -788,10 +788,25 @@ if __name__ == '__main__':
     elif args.initial_seq in ('db', 'dbaasp') or args.initial_seq.startswith(('db:', 'dbaasp:')):
         import amp_db
         spec = args.initial_seq.split(':', 1)[1] if ':' in args.initial_seq else 'random'
-        seeds = amp_db.seeds_for_population(spec, args.pop_size)
-        uniq = sorted({n for n, _ in seeds})
-        print(f"  seeded from AMP DB ({spec}): {', '.join(uniq[:5])}"
-              f"{' …' if len(uniq) > 5 else ''}")
+        if spec.startswith('mix'):
+            # Mixed start: existing AMPs + random sequences whose length equals the
+            # existing seeds' MEAN length. spec 'mix' = 50/50; 'mix:<frac>' sets the
+            # existing fraction, e.g. -iseq db:mix:0.5 (50 existing / 50 random at -ps 100).
+            try:
+                frac = float(spec.split(':')[1]) if ':' in spec else 0.5
+            except (IndexError, ValueError):
+                frac = 0.5
+            seeds = amp_db.mixed_population(args.pop_size, frac,
+                                            evolver.randomseq, args.random_seq_len)
+            n_rand = sum(1 for n, _ in seeds if n.startswith('rand'))
+            rand_len = next((len(s) for n, s in seeds if n.startswith('rand')), args.random_seq_len)
+            print(f"  seeded MIX: {len(seeds) - n_rand} existing AMPs + {n_rand} random "
+                  f"@ {rand_len} aa (= mean length of the existing seeds)")
+        else:
+            seeds = amp_db.seeds_for_population(spec, args.pop_size)
+            uniq = sorted({n for n, _ in seeds})
+            print(f"  seeded from AMP DB ({spec}): {', '.join(uniq[:5])}"
+                  f"{' …' if len(uniq) > 5 else ''}")
         init_gen = pd.DataFrame({'id': [f'init_{n}' for n, _ in seeds],
                                  'sequence': [s for _, s in seeds],
                                  'score': [0.001] * len(seeds)})
