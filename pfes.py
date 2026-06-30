@@ -720,8 +720,21 @@ if __name__ == '__main__':
             help="Maximum number of tokens per forward-pass. Lower this if you run out of memory. "
             "Default 512 is conservative and safe for CPU runs."
     )
+    parser.add_argument(
+            '--seed', type=int, default=None,
+            help='RNG seed for reproducibility. Use the SAME seed (and the same -iseq) '
+                 'across branches so they start identically and mutate comparably.',
+    )
 
     args = parser.parse_args()
+
+    # Seed all RNGs before any random use (seeding, mutation, selection) so runs
+    # are reproducible and the 2x2 branches can share an identical start.
+    if args.seed is not None:
+        import random as _random
+        _random.seed(args.seed)
+        np.random.seed(args.seed)
+
     evolver = Evolver(args.evoldict)
 
     now = datetime.now() # current date and time
@@ -774,9 +787,31 @@ if __name__ == '__main__':
     pdb_path = args.outpath + '/structures/' 
 
     #create the initial generation
-    if args.initial_seq == 'random':
+    if args.initial_seq.startswith('file:'):
+        # Load a FIXED initial population from a FASTA (one record per member).
+        # Build it once with `python amp_db.py --make-init ... -o init_pop.faa`
+        # and pass the SAME file to every branch for an identical start.
+        import amp_db
+        recs = amp_db.parse_fasta(args.initial_seq.split(':', 1)[1])
+        if not recs:
+            print(f"  Error: no sequences in {args.initial_seq.split(':', 1)[1]}")
+            sys.exit(1)
+        seqs = [r['seq'] for r in recs]
+        names = [r['name'] for r in recs]
+        if len(seqs) < args.pop_size:        # cycle if the file is smaller than pop
+            reps = args.pop_size // len(seqs) + 1
+            seqs = (seqs * reps)[:args.pop_size]
+            names = (names * reps)[:args.pop_size]
+        else:
+            seqs, names = seqs[:args.pop_size], names[:args.pop_size]
+        print(f"  loaded fixed init population: {len(seqs)} members from "
+              f"{args.initial_seq.split(':', 1)[1]}")
+        init_gen = pd.DataFrame({'id': [f'init_{n}' for n in names],
+                                 'sequence': seqs,
+                                 'score': [0.001] * len(seqs)})
+    elif args.initial_seq == 'random':
         randomsequence = evolver.randomseq(args.random_seq_len)
-        init_gen = pd.DataFrame({'id': ['init_seq'] * args.pop_size, 
+        init_gen = pd.DataFrame({'id': ['init_seq'] * args.pop_size,
                                  'sequence': [randomsequence] * args.pop_size,
                                  'score': [0.001] * args.pop_size})
     elif args.initial_seq == 'randoms':

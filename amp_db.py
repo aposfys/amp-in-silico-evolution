@@ -473,10 +473,39 @@ def _main(argv=None):
                     help="(re)compute the hemo_risk attribute for the cache and save it")
     ap.add_argument("--no-annotate", action="store_true",
                     help="skip hemolysis annotation when fetching/importing")
-    ap.add_argument("--out", default=CACHE_PATH, help=f"cache path (default {CACHE_PATH})")
+    ap.add_argument("--out", "-o", default=CACHE_PATH, help=f"output/cache path (default {CACHE_PATH})")
     ap.add_argument("--id-end", type=int, default=20000, help="max peptide id to scan (--fetch --source dbaasp)")
     ap.add_argument("--list", action="store_true", help="list the active pool and exit")
+    ap.add_argument("--make-init", action="store_true",
+                    help="write a FIXED initial population (existing AMPs + length-matched "
+                         "random) to --out, for an identical start across runs")
+    ap.add_argument("--pop", type=int, default=100, help="population size for --make-init")
+    ap.add_argument("--frac-existing", type=float, default=0.5,
+                    help="fraction of the init population drawn from known AMPs (--make-init)")
+    ap.add_argument("--rand-len", type=int, default=24,
+                    help="fallback random length if there are no existing seeds (--make-init)")
+    ap.add_argument("--seed", type=int, default=None, help="RNG seed (reproducible --make-init)")
     args = ap.parse_args(argv)
+
+    if args.make_init:
+        out = "init_pop.faa" if args.out == CACHE_PATH else args.out
+        if args.seed is not None:
+            _random.seed(args.seed)
+        try:
+            from evolution import Evolver
+            randomseq = Evolver("flatrates").randomseq
+        except Exception:
+            randomseq = None
+        seeds = mixed_population(args.pop, args.frac_existing, randomseq, args.rand_len)
+        os.makedirs(os.path.dirname(os.path.abspath(out)) or ".", exist_ok=True)
+        with open(out, "w") as fh:
+            for i, (name, seq) in enumerate(seeds):
+                fh.write(f">{name}_{i}\n{seq}\n")
+        n_rand = sum(1 for n, _ in seeds if n.startswith("rand"))
+        print(f"wrote {len(seeds)} init members ({len(seeds) - n_rand} existing AMPs + "
+              f"{n_rand} random) -> {out}\n"
+              f"use the SAME file for every branch:  -iseq file:{out}")
+        return
 
     def _maybe_annotate(recs):
         if not args.no_annotate:
