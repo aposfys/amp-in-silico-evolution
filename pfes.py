@@ -722,11 +722,47 @@ if __name__ == '__main__':
     )
     parser.add_argument(
             '--seed', type=int, default=None,
-            help='RNG seed for reproducibility. Use the SAME seed (and the same -iseq) '
+            help='RNG seed for reproducibility. Use the SAME seed (and the same start) '
                  'across branches so they start identically and mutate comparably.',
+    )
+    parser.add_argument(
+            '--start', choices=['random', 'randoms', 'existing', 'mix', 'file', 'seq'],
+            default=None,
+            help='HIGH-LEVEL choice of the starting population (overrides -iseq): '
+                 'random = one random sequence copied across the population; '
+                 'randoms = a different random sequence per slot; '
+                 'existing = known AMPs from the database (diverse); '
+                 'mix = existing AMPs + random sequences at the existing mean length (see --mix-frac); '
+                 'file = a fixed population from --start-file; '
+                 'seq = a literal sequence given via -iseq.',
+    )
+    parser.add_argument(
+            '--mix-frac', type=float, default=0.5,
+            help='fraction of the population drawn from existing AMPs when --start mix (default 0.5)',
+    )
+    parser.add_argument(
+            '--start-file', type=str, default=None,
+            help='FASTA of a fixed initial population (one record per member) when --start file',
     )
 
     args = parser.parse_args()
+
+    # --start is a friendly front-end for -iseq: translate it into the initial_seq
+    # string the seeding code understands. -iseq still works on its own.
+    if args.start:
+        if args.start in ('random', 'randoms'):
+            args.initial_seq = args.start
+        elif args.start == 'existing':
+            args.initial_seq = 'db:diverse'
+        elif args.start == 'mix':
+            args.initial_seq = f'db:mix:{args.mix_frac}'
+        elif args.start == 'file':
+            if not args.start_file:
+                print("  Error: --start file requires --start-file <path.faa>")
+                sys.exit(1)
+            args.initial_seq = f'file:{args.start_file}'
+        elif args.start == 'seq':
+            pass  # use whatever -iseq provided
 
     # Seed all RNGs before any random use (seeding, mutation, selection) so runs
     # are reproducible and the 2x2 branches can share an identical start.
@@ -792,9 +828,14 @@ if __name__ == '__main__':
         # Build it once with `python amp_db.py --make-init ... -o init_pop.faa`
         # and pass the SAME file to every branch for an identical start.
         import amp_db
-        recs = amp_db.parse_fasta(args.initial_seq.split(':', 1)[1])
+        init_path = args.initial_seq.split(':', 1)[1]
+        if not os.path.isfile(init_path):
+            print(f"  Error: init population file not found: {init_path}")
+            print(f"  Build it with:  python amp_db.py --make-init --pop {args.pop_size} --seed {args.seed} -o {init_path}")
+            sys.exit(1)
+        recs = amp_db.parse_fasta(init_path)
         if not recs:
-            print(f"  Error: no sequences in {args.initial_seq.split(':', 1)[1]}")
+            print(f"  Error: no sequences in {init_path}")
             sys.exit(1)
         seqs = [r['seq'] for r in recs]
         names = [r['name'] for r in recs]
