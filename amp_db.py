@@ -253,6 +253,31 @@ def seeds_for_population(spec, pop_size, rng=None, pool=None):
     return [(d["name"], d["seq"])] * pop_size
 
 
+def mixed_population(pop_size, frac_existing=0.5, randomseq=None,
+                     default_len=24, rng=None, pool=None):
+    """Build a mixed starting population: `frac_existing` of pop_size drawn from
+    the known-AMP database (diverse), the remainder random sequences whose length
+    equals the existing seeds' MEAN length.
+
+    `randomseq` is a callable(length) -> sequence (e.g. Evolver.randomseq); if
+    None, a uniform 20-aa generator is used. Returns a list of (name, sequence)
+    of length pop_size; random entries are named 'rand<len>aa'.
+    """
+    rng = rng or _random
+    pool = pool or load_pool()
+    n_exist = round(pop_size * frac_existing)
+    n_rand = pop_size - n_exist
+    existing = seeds_for_population('diverse', n_exist, rng=rng, pool=pool) if n_exist > 0 else []
+    if existing:
+        mean_len = max(1, round(sum(len(s) for _, s in existing) / len(existing)))
+    else:
+        mean_len = default_len
+    if randomseq is None:
+        randomseq = lambda n: "".join(rng.choice("ACDEFGHIKLMNPQRSTVWY") for _ in range(n))
+    randoms = [(f"rand{mean_len}aa", randomseq(mean_len)) for _ in range(n_rand)]
+    return existing + randoms
+
+
 # ---------------------------------------------------------------------------
 # Cache building: import a downloaded file, or fetch from the DBAASP API
 # ---------------------------------------------------------------------------
