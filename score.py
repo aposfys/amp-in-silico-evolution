@@ -392,7 +392,8 @@ def hemopi2_score_batch(sequences, model=1):
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             fasta_path = os.path.join(tmpdir, 'hemo_in.fa')
-            out_path = os.path.join(tmpdir, 'hemo_out.csv')
+            out_name = 'hemo_out.csv'          # HemoPI2 writes to <wd>/<-o>, so -o must be a bare name
+            out_path = os.path.join(tmpdir, out_name)
             order = []
             with open(fasta_path, 'w') as fh:
                 for i, seq in enumerate(sequences):
@@ -401,9 +402,9 @@ def hemopi2_score_batch(sequences, model=1):
             try:
                 result = subprocess.run(
                     ['hemopi2_classification', '-i', fasta_path,
-                     '-o', out_path, '-m', str(model), '-j', '1',
+                     '-o', out_name, '-m', str(model), '-j', '1',
                      '-wd', tmpdir],
-                    capture_output=True, text=True, timeout=600,
+                    capture_output=True, text=True, timeout=600, cwd=tmpdir,
                 )
             except FileNotFoundError:
                 sys.stderr.write(
