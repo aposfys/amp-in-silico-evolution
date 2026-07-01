@@ -226,13 +226,24 @@ class Evolver():
         if selection_mode == "strong":
             new_init_gen = mixed_pop.sort_values('score', ascending=False).head(pop_size)
 
-        elif selection_mode == "weak":
-            weights = np.array(e**(beta * mixed_pop.score) / np.array(e**(beta * mixed_pop.score)).sum())
-            new_init_gen = mixed_pop.sample(n=pop_size, weights=weights, replace=use_replace).sort_values('score', ascending=False)
-
-        elif selection_mode == "weak2":
-            weights = np.array((mixed_pop.score) / ((mixed_pop.score).sum()))
-            new_init_gen = mixed_pop.sample(n=pop_size, weights=weights, replace=use_replace).sort_values('score', ascending=False)
+        elif selection_mode in ("weak", "weak2"):
+            s = mixed_pop.score.to_numpy(dtype=float)
+            if selection_mode == "weak":
+                # numerically stable Boltzmann softmax (subtract max to avoid overflow)
+                w = np.exp(beta * (s - np.nanmax(s))) if len(s) else s
+            else:  # weak2: score-proportional
+                w = np.clip(s, 0.0, None)
+            w = np.nan_to_num(w, nan=0.0, posinf=0.0, neginf=0.0)
+            weights = None if w.sum() <= 0 else w / w.sum()
+            # A weighted draw WITHOUT replacement needs >= pop_size entries with
+            # weight > 0. High beta makes most weights underflow to 0, so fall
+            # back to sampling with replacement in that case (prevents the pandas
+            # "Weighted sampling cannot be achieved with replace=False" error).
+            replace = use_replace
+            if weights is not None and not replace and int((weights > 0).sum()) < pop_size:
+                replace = True
+            new_init_gen = mixed_pop.sample(n=pop_size, weights=weights,
+                                            replace=replace).sort_values('score', ascending=False)
 
         else:
             raise ValueError(f'Unknown selection_mode "{selection_mode}". Valid options: strong, weak, weak2')
