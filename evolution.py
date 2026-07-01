@@ -235,15 +235,24 @@ class Evolver():
                 w = np.clip(s, 0.0, None)
             w = np.nan_to_num(w, nan=0.0, posinf=0.0, neginf=0.0)
             weights = None if w.sum() <= 0 else w / w.sum()
-            # A weighted draw WITHOUT replacement needs >= pop_size entries with
-            # weight > 0. High beta makes most weights underflow to 0, so fall
-            # back to sampling with replacement in that case (prevents the pandas
-            # "Weighted sampling cannot be achieved with replace=False" error).
-            replace = use_replace
-            if weights is not None and not replace and int((weights > 0).sum()) < pop_size:
-                replace = True
-            new_init_gen = mixed_pop.sample(n=pop_size, weights=weights,
-                                            replace=replace).sort_values('score', ascending=False)
+
+            # Sample the next generation with numpy directly. pandas' weighted
+            # sampler rejects peaked weight distributions ("Weighted sampling
+            # cannot be achieved with replace=False"), which is exactly what high
+            # beta produces, so we bypass it.
+            rng = np.random.default_rng()
+            n_items = len(mixed_pop)
+            if use_replace or n_items < pop_size:
+                chosen = rng.choice(n_items, size=pop_size, replace=True, p=weights)
+            elif weights is None:
+                chosen = rng.choice(n_items, size=pop_size, replace=False)
+            else:
+                # weighted sampling WITHOUT replacement via Efraimidis-Spirakis
+                # (Gumbel-top-k): numerically robust for extreme/peaked weights.
+                u = rng.random(n_items)
+                keys = np.where(w > 0, np.log(u) / w, -np.inf)
+                chosen = np.argpartition(keys, -pop_size)[-pop_size:]
+            new_init_gen = mixed_pop.iloc[chosen].sort_values('score', ascending=False)
 
         else:
             raise ValueError(f'Unknown selection_mode "{selection_mode}". Valid options: strong, weak, weak2')
