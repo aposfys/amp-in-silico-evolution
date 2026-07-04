@@ -141,7 +141,8 @@ def _print_startup(args, evolver, date_now, time_now):
     init_display = args.initial_seq if len(args.initial_seq) <= 40 else args.initial_seq[:40] + '…'
     print(f"  init seq:   {init_display}  (rand_len={args.random_seq_len})")
     print(f"  penalties:  len≥{args.prot_len_penalty}  helix≥{args.helix_len_penalty}  beta≥{args.beta_len_penalty}")
-    print(f"  scoring:    pLDDT×pTM×len_pen×helix_pen×beta_pen×AMP×(1-hemo)×contacts  [MACREL AMP + HemoPI2 hemo + PFES]")
+    _hemo = "hemo=attribute-only (not in score)" if args.hemo_attribute_only else "×(1-hemo)"
+    print(f"  scoring:    pLDDT×pTM×len_pen×helix_pen×beta_pen×AMP{'' if args.hemo_attribute_only else '×(1-hemo)'}×contacts  [MACREL AMP + PFES; {_hemo}]")
     print(f"  output:     {args.outpath}/{args.log}")
     print(f"{'═'*_W}\n")
 
@@ -237,8 +238,12 @@ def extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_s
         max_alpha_penalty = 1 - sigmoid(max_helix, args.helix_len_penalty, 0.5)
         max_beta_penalty = 1 - sigmoid(max_beta, args.beta_len_penalty, 0.6)
 
-        # MACREL AMP probability + HemoPI2 hemolytic penalty
+        # MACREL AMP probability. HemoPI2 hemolysis is ALWAYS computed and logged as an
+        # attribute (the hemo_prob column). By default it also penalises the score via
+        # (1 - hemo_prob); with --hemo-attribute-only it is attribute-only (hemo_factor = 1)
+        # so hemolysis is reported but does NOT drive selection.
         amp_prob, hemo_prob = macrel_scores.get(seq, (calculate_samp(seq), calculate_hemo_proxy(seq)))
+        hemo_factor = 1.0 if args.hemo_attribute_only else (1 - hemo_prob)
 
         if args.evolution_mode == "single_chain":
             # iplddt and inter-chain contact term are always 1.0 for single chains — omit them.
@@ -248,7 +253,7 @@ def extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_s
                              max_beta_penalty,
                              max_alpha_penalty,
                              amp_prob,
-                             1 - hemo_prob,
+                             hemo_factor,
                              (num_conts + seq_len) / seq_len])
         else:
             score = np.prod([mean_plddt,
@@ -258,7 +263,7 @@ def extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_s
                              max_beta_penalty,
                              max_alpha_penalty,
                              amp_prob,
-                             1 - hemo_prob,
+                             hemo_factor,
                              (num_conts + seq_len) / seq_len,
                              (num_inter_conts + seq_len) / (seq_len + 1)])
         #================================SCORING================================#
@@ -743,6 +748,11 @@ if __name__ == '__main__':
     parser.add_argument(
             '--start-file', type=str, default=None,
             help='FASTA of a fixed initial population (one record per member) when --start file',
+    )
+    parser.add_argument(
+            '--hemo-attribute-only', action='store_true',
+            help='compute & log HemoPI2 hemolysis as an attribute (hemo_prob column) but do NOT '
+                 'include it in the fitness score (i.e. hemolysis does not drive selection)',
     )
 
     args = parser.parse_args()
