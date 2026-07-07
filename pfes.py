@@ -902,11 +902,28 @@ if __name__ == '__main__':
                                  'score': [0.001] * args.pop_size})
     
 
-    # Require HuggingFace token for gated ESM3 model access
+    # HuggingFace token for gated ESM3 model access. Use the HF_TOKEN env var if set,
+    # otherwise fall back to a cached `huggingface-cli login` token so you only enter
+    # it once and never need to re-export it.
     if "HF_TOKEN" not in os.environ:
-        print(f"  Error: HF_TOKEN environment variable not set.")
-        print(f"  Run:  export HF_TOKEN=your_huggingface_token")
-        sys.exit(1)
+        _tok = None
+        try:
+            from huggingface_hub import get_token as _hf_get_token
+            _tok = _hf_get_token()
+        except Exception:
+            try:
+                from huggingface_hub import HfFolder
+                _tok = HfFolder.get_token()
+            except Exception:
+                _tok = None
+        if _tok:
+            os.environ["HF_TOKEN"] = _tok
+        else:
+            print(f"  Error: no HuggingFace token found.")
+            print(f"  Do ONE of (once):")
+            print(f"    huggingface-cli login          # stores it permanently in ~/.cache/huggingface")
+            print(f"    export HF_TOKEN=your_token      # add this line to ~/.bashrc to persist")
+            sys.exit(1)
 
     print(f"  Loading ESM3 (esm3-sm-open-v1)...", end='  ', flush=True)
     try:
