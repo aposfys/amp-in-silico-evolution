@@ -754,6 +754,12 @@ if __name__ == '__main__':
                  'DEFAULT: hemolysis is computed & logged as an attribute (hemo_prob column) '
                  'but does NOT drive selection.',
     )
+    parser.add_argument(
+            '--threads', type=int, default=None,
+            help='cap CPU threads for ESM3 folding (default: all cores). Set this when '
+                 'running several PFES processes on one node, e.g. --threads 6 for 8 '
+                 'parallel runs on a 48-core machine.',
+    )
 
     args = parser.parse_args()
 
@@ -940,7 +946,8 @@ if __name__ == '__main__':
         device = torch.device("cuda")
     else:
         device = torch.device("cpu")
-        n_threads = os.cpu_count() or 1
+        # --threads caps CPU threads so several runs can share one node without thrashing.
+        n_threads = args.threads if args.threads else (os.cpu_count() or 1)
         torch.set_num_threads(n_threads)
         print(f"\n  Note: running on CPU ({n_threads} threads) — expect slow fold times.")
         print(f"        Recommended: -ps 4 -ng 20 --max-tokens-per-batch 256")
