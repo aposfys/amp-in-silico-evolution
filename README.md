@@ -1,193 +1,117 @@
 # PFES — fitness-macrel-structured
 
-Evolves antimicrobial peptides using **MACREL** (ML AMP classifier), **HemoPI2** (ML hemolysis predictor), **ESM3** (fold quality), and a full set of **structural penalties** (length, secondary structure, contact density). This is the recommended branch for generating drug candidates — it constrains sequences to therapeutically realistic lengths (~20–30 aa).
+Evolves antimicrobial peptides using **MACREL** (AMP classifier), **HemoPI2** (hemolysis, logged as an attribute), **ESM3** (fold), and the full **PFES structural penalties** (length, secondary structure, contact density).
 
-> Renamed from `fitness-macrel-pfes` (both branches run on the PFES framework; the suffix now reflects that this one applies the full PFES **structural** fitness terms). The length-unconstrained variant is `fitness-macrel-foldonly`.
+> **2×2 matrix** (classifier × structural penalties): `fitness-macrel-foldonly` · `fitness-macrel-structured` · `fitness-amplify-foldonly` · `fitness-amplify-structured`. All share ESM3 folding + HemoPI2 + DRAMP seeding.
 
-## Fitness formula
-
+## Fitness score
 ```
-score = pLDDT × pTM × length_penalty × helix_penalty × beta_penalty
-        × AMP_probability × (1 − hemolytic_probability)
-        × (num_contacts + seq_len) / seq_len
+score = pLDDT × pTM × length_penalty × helix_penalty × beta_penalty × AMP_probability × contact_density
 ```
+| Term | Source | Range | Note |
+|---|---|---|---|
+| pLDDT | ESM3 | 0–1 | per-residue fold confidence |
+| pTM | ESM3 | 0–1 | overall-fold confidence |
+| AMP_probability | MACREL | 0–1 | probability the peptide is antimicrobial |
+| length_penalty | PFES | 0–1 | →0 above ~30 aa (caps length) |
+| helix_penalty | PFES (PSIQUE) | 0–1 | →0 for α-helices > ~20 residues |
+| beta_penalty | PFES (PSIQUE) | 0–1 | →0 for β-strands > ~12 residues |
+| contact_density | PFES | > 1 | rewards compact folds |
+| (1 − hemolysis) | HemoPI2 | 0–1 | **OFF by default** — only in the score with `--hemo-in-score` |
 
-| Term | Source | Notes |
-|------|--------|-------|
-| pLDDT | ESM3 per-residue confidence | [0, 1] |
-| pTM | ESM3 predicted TM-score | [0, 1] |
-| length_penalty | Sigmoid penalty for sequences > target length | [0, 1] |
-| helix_penalty | Penalty for excessive α-helix content | [0, 1] |
-| beta_penalty | Penalty for excessive β-strand content | [0, 1] |
-| AMP_probability | MACREL ML classifier | [0, 1] |
-| 1 − hemolytic_probability | HemoPI2 ML predictor (falls back to biophysical proxy) | [0, 1] |
-| (contacts + len) / len | Contact density — rewards compact folds | > 1.0 for helices |
+> **Hemolysis is an ATTRIBUTE by default:** HemoPI2 runs every generation and writes `hemo_prob` for each peptide, but it does **not** affect selection. Screen/rank candidates by `hemo_prob` afterwards, **or** add `--hemo-in-score` to make `× (1 − hemolysis)` part of the fitness.
 
-The contact density term is the only term that can exceed 1.0. A compact 26 aa helix with ~28 contacts gives (28+26)/26 = **2.08**, which compensates for the structural penalties and keeps short peptides competitive.
-
----
-
-## Installation
-
+## Install
 ```bash
-# 1. Clone and switch to this branch
+# 1. clone + branch
 git clone https://github.com/aposfys/PFES-AMPs.git && cd PFES-AMPs
 git checkout fitness-macrel-structured
 
-# 2. Create environment
-conda create -n pfes_amps python=3.11
-conda activate pfes_amps
-
-# 3. Python dependencies (includes peptides + hemopi2)
+# 2. environment
+conda create -n pfes_amps python=3.11 -y && conda activate pfes_amps
+pip install torch --index-url https://download.pytorch.org/whl/cpu    # CPU build (drop --index-url for GPU)
 pip install -r requirements.txt
+pip install "numpy<2" "pillow<12"        # HemoPI2/scikit-learn need numpy < 2
 
-# 4. MACREL (Bioconda)
-conda install -c bioconda -c conda-forge macrel
+# 3. MACREL (Bioconda)  — the AMP classifier
+conda install -c bioconda -c conda-forge macrel -y
 
-# 5. PSIQUE (secondary structure)
-pip install git+https://github.com/sahakyanhk/psique
+# 4. psique (secondary structure) is BUNDLED (bin/psique + psique.py) — no install needed
 
-# 6. ESM3 access token
-#    Accept the licence at: https://huggingface.co/EvolutionaryScale/esm3-sm-open-v1
+# 5. ESM3 access token (accept licence at huggingface.co/EvolutionaryScale/esm3-sm-open-v1)
 export HF_TOKEN=your_token_here
 ```
 
 Verify:
 ```bash
-macrel --version
-python -c "from score import macrel_score_batch; print('OK')"
+python -c "from esm.models.esm3 import ESM3; print('ESM3 ok')"
+python -c "import score; print(score.macrel_score_batch(['GIGKFLHSAKKFGKAFVGEIMNS']))"
 ```
 
 ---
 
-## Parameters (full reference)
+## How to run — step by step
 
-All options are command-line flags — `python pfes.py --help` prints them.
+### 1. One-time setup: seed database + hemolysis labels
+```bash
+export PFES_AMP_DB=$PWD/data/dbaasp.faa
+python amp_db.py --fetch          # ~10,700 validated AMPs from DRAMP -> data/dbaasp.faa
+python amp_db.py --annotate-hemo  # HemoPI2 hemo_risk label per DB peptide (needs hemopi2)
+```
 
-### Run size & control
-| Flag | Default | Meaning |
-|------|---------|---------|
-| `-ng`, `--num_generations` | 100 | number of generations |
-| `-ps`, `--pop_size` | 10 | sequences per generation (population size) |
-| `--seed` | none | RNG seed. Same seed **and** same `-iseq` ⇒ identical start across branches |
-| `--norepeat` | off | never re-evaluate / re-select a sequence already seen (diversity + saves folds) |
-| `-o`, `--outpath` | `output` | output directory |
-| `-l`, `--log` | `progress.log` | log file name |
-| `--nobackup` | off | overwrite existing output instead of backing up |
+### 2. Build the starting population — pick an arm
+```bash
+# MIX (50 existing AMPs + 50 random at the existing mean length)
+python amp_db.py --make-init --pop 100 --frac-existing 0.5 --seed 42 -o init_mix.faa
+# EXISTING ONLY (100 known AMPs)
+python amp_db.py --make-init --pop 100 --frac-existing 1.0 --seed 42 -o init_existing.faa
+# RANDOM ONLY (100 random sequences)
+python amp_db.py --make-init --pop 100 --frac-existing 0.0 --rand-len 25 --seed 42 -o init_random.faa
+```
+Using your OWN AMPs instead of DRAMP: `python amp_db.py --import your_amps.faa` first, then `--make-init --frac-existing 1.0`.
+The same init file is reused across branches so every arm starts identically (a fair comparison).
 
-### Starting population — **`--start`** (the easy way to choose random / existing / mix)
-This is the high-level switch for *what the population starts from*:
+### 3. Smoke test first (a few minutes — confirms the tools engage)
+```bash
+python pfes.py --start file --start-file init_mix.faa -ps 8 -ng 3 -sm weak -b 20 --seed 42 -o /tmp/smoke
+```
+Check: no "falling back" warnings; the `hemo` column varies; MACREL + HemoPI2 actually ran.
 
-| `--start` | What you get | extra flags |
-|-----------|--------------|-------------|
-| `random` | one random sequence copied across the population | `--random_seq_len N` (24) |
-| `randoms` | a different random sequence in every slot | `--random_seq_len N` |
-| `existing` | known AMPs from the database (diverse) | — |
-| `mix` | **existing AMPs + random sequences** at the existing seeds' mean length | `--mix-frac F` (0.5 = 50/50) |
-| `file` | a **fixed** population loaded from a FASTA (identical start for every branch) | `--start-file PATH` |
-| `seq` | a literal sequence | give it via `-iseq <SEQUENCE>` |
+### 4. Full run
+```bash
+nice -5 python pfes.py \
+  --start file --start-file init_mix.faa \
+  -ps 100 -ng 100 -sm weak -b 20 \
+  --seed 42 --norepeat --max-tokens-per-batch 4096 \
+  -o results/macrel-structured 2>&1 | tee results/macrel-structured.log
+```
+- **Hemolysis:** attribute-only by default (add `--hemo-in-score` to put it in the fitness).
+- **Selection:** `-sm weak -b 20` (fitness-proportional, keeps diversity) or `-sm strong` (greedy top-N).
+- **CPU:** with `--max-tokens-per-batch 4096` a generation is ~1–2 min on ~48 cores → ~2–3 h for 100 generations. **Run inside `tmux`** so a disconnect can't kill it (detach: Ctrl-b then d).
 
-Example: `--start mix --mix-frac 0.5` → 50% existing AMPs + 50% random (your 50/50 plan).
+### 5. Analyse (graphs)
+```bash
+python visual_pfes.py -l results/macrel-structured/progress.log -s results/macrel-structured/structures -o results/macrel-structured/analysis --notraj
+```
+→ `Summary.png`, `Evolution.png`, `Score_components.png`, `Fitness_landscape.png`, `AA_composition.png`, plus per-column plots (`plots/score.png`, `amp_prob.png`, `hemo_prob.png`, `seq_len.png`).
 
-<details><summary>Underlying <code>-iseq</code> values (advanced; <code>--start</code> just sets these)</summary>
-
-`random` · `randoms` · `<SEQUENCE>` · `db`/`db:random` · `db:diverse` · `db:low`/`db:high` · `db:<name>` (e.g. `db:magainin_2`) · `db:mix[:frac]` · `file:<path>`
-</details>
-
-### Mutation & selection
-| Flag | Default | Meaning |
-|------|---------|---------|
-| `-ed`, `--evoldict` | `flatrates` | mutation-rate set: `flatrates`, `codonrates`, `flatoptim`, `uniprotrates` |
-| `-sm`, `--selection_mode` | `weak` | **`strong`** = deterministic top-N (fittest survive); `weak` = fitness-proportional sampling; `weak2` |
-| `-b`, `--beta` | 1 | selection sharpness for the `weak` modes (20–50 typical). **Ignored when `-sm strong`.** |
-
-### Structural penalties
-*On the **structured** branches these drive the score; on the **foldonly** branches they are logged but not part of the score.*
-| Flag | Default | Meaning |
-|------|---------|---------|
-| `-pl0`, `--prot_len_penalty` | 30 | sequence length (aa) above which the length penalty kicks in |
-| `-hl0`, `--helix_len_penalty` | 20 | α-helix length threshold |
-| `-bl0`, `--beta_len_penalty` | 12 | β-strand length threshold |
-
-### ESM3 / performance / mode
-| Flag | Default | Meaning |
-|------|---------|---------|
-| `--num-recycles` | 1 | ESM3 denoising steps per fold (higher = better fold, slower) |
-| `--max-tokens-per-batch` | 512 | fold batch size; lower if you hit OOM (256 for CPU) |
-| `-em`, `--evolution_mode` | `single_chain` | `single_chain`, `inter_chain`, `multimer` |
+### 6. Compare arms / branches
+Run the same command with a different `--start-file` (existing / random / mix) or a different branch (change `git checkout` + `-o`). Identical start ⇒ differences are attributable to the design choice.
 
 ---
 
-## 1. Set up the AMP seed database (once)
-
-```bash
-pip install hemopi2
-python amp_db.py --fetch            # DRAMP ~10.7k AMPs -> data/dbaasp.faa
-python amp_db.py --annotate-hemo    # adds the hemo_risk attribute (uses HemoPI2)
-```
-
-## 2. Build ONE shared starting population
-
-```bash
-python amp_db.py --make-init --pop 100 --frac-existing 0.5 --seed 42 -o init_pop.faa
-# 50 existing AMPs + 50 random at the existing mean length; reuse this file everywhere
-```
-
-## 3. Smoke test first (~5 min) — confirm the real tools engage
-
-```bash
-python pfes.py --start file --start-file init_pop.faa -ps 8 -ng 3 -sm strong --seed 42 -o /tmp/smoke
-```
-Check: **no "falling back" warnings**, `hemo_prob` varies in the log, the AMP classifier + HemoPI2 actually ran.
-
-## 4. Full run — strong evolution
-
-```bash
-python pfes.py \
-  -em single_chain -sm strong \
-  --start file --start-file init_pop.faa \
-  -ps 100 -ng 300 \
-  --seed 42 --norepeat \
-  -o results/macrel-structured
-```
-`-sm strong` keeps the deterministic top-`pop_size` sequences each generation (greediest selection). For CPU add `--max-tokens-per-batch 256` and use a smaller `-ps`/`-ng`.
-
-> Don't want a fixed file? Use `--start mix --mix-frac 0.5` to generate 50 existing + 50 random on the fly — but for a *fair 4-branch comparison* use the shared `--start file` so every branch starts identically.
-
-## 5. Compare the four branches (2×2)
-
-Run the **identical** command on each branch (same `init_pop.faa` + `--seed`), changing only `-o`:
-```bash
-for B in macrel-foldonly macrel-structured amplify-foldonly amplify-structured; do
-  git checkout fitness-$B
-  python pfes.py --start file --start-file init_pop.faa -ps 100 -ng 300 -sm strong --seed 42 --norepeat -o results/$B
-done
-# amplify branches also need:  export AMPLIFY_CMD="conda run -n amplify AMPlify"
-```
-Because the start is identical, differences are attributable to the two factors: classifier (MACREL vs AMPlify) and structural penalties (off vs on).
-
----
+## Key options
+| Flag | Default | Meaning |
+|---|---|---|
+| `--start {random,randoms,existing,mix,file}` | random | starting population; `file` loads `--start-file` |
+| `--start-file PATH` / `--mix-frac F` | — / 0.5 | fixed init FASTA / existing-vs-random ratio for mix |
+| `--hemo-in-score` | off | put HemoPI2 hemolysis back into the fitness score |
+| `-ng` / `-ps` | 100 / 10 | generations / population size |
+| `-sm` / `-b` | weak / 1 | selection: `weak` (β via `-b`), `weak2`, `strong` |
+| `--seed` | none | RNG seed (identical start across branches) |
+| `--norepeat` | off | never re-evaluate a sequence already seen |
+| `-pl0 / -hl0 / -bl0` | 30 / 20 / 12 | length / helix / β penalty thresholds
+| `--max-tokens-per-batch` | 512 | fold batch size (use ~4096 to minimise classifier reloads) |
 
 ## Output (`<outdir>/progress.log`, tab-separated)
-
-```
-gndx               generation index            amp_prob   AMP probability (MACREL/AMPlify)
-id                 sequence id                 hemo_prob  hemolysis probability (HemoPI2)
-seq_len            length (aa)                 score      total fitness score
-prot_len_penalty   length penalty [0,1]        sequence   amino-acid sequence
-max_alpha_penalty  helix penalty [0,1]         mutation   mutation that produced it
-max_beta_penalty   beta penalty  [0,1]         prev_id    parent id
-ptm / mean_plddt   ESM3 confidence [0,1]       ss         secondary structure (PSIQUE)
-num_conts          Cα contacts within 8 Å
-```
-Structures are saved as gzipped PDB under `<outdir>/structures/`.
-
-## Analyse / graphs
-
-```bash
-python visual_pfes.py \
-  -l results/macrel-structured/progress.log \
-  -s results/macrel-structured/structures/ \
-  -o results/macrel-structured/analysis/
-```
-Produces `Summary.png`, `Evolution.png`, `Score_components.png`, `Fitness_landscape.png`, `AA_composition.png`, `Secondary_structures.png`, per-column plots, and `lineage.tsv`.
+`gndx` generation · `seq_len` · `prot_len_penalty` `max_alpha_penalty` `max_beta_penalty` · `ptm` `mean_plddt` (ESM3) · `num_conts` · `amp_prob` (MACREL) · **`hemo_prob` (HemoPI2 — the attribute)** · `score` · `sequence` · `mutation` · `ss`. Structures: gzipped PDB in `<outdir>/structures/`.
