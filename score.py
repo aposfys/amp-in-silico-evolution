@@ -386,6 +386,11 @@ def hemopi2_score_batch(sequences, model=1):
     or fails.
     """
     import subprocess, tempfile
+    if os.environ.get("PFES_SKIP_HEMO") == "1":
+        # Hemolysis is attribute-only; skip the per-generation HemoPI2 subprocess
+        # (avoids re-importing transformers/torch every generation). Score the
+        # final candidates with HemoPI2 once, post-hoc. hemo_prob logged as 0.0.
+        return {seq: 0.0 for seq in sequences}
     fallback = {seq: calculate_hemo_proxy(seq) for seq in sequences}
     if not sequences:
         return {}
