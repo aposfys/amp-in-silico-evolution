@@ -73,7 +73,7 @@ The same init file is reused across branches so every arm starts identically (a 
 
 ### 3. Smoke test first (a few minutes — confirms the tools engage)
 ```bash
-python pfes.py --start file --start-file init_mix.faa -ps 8 -ng 3 -sm weak -b 20 --seed 42 -o /tmp/smoke
+python pfes.py --start file --start-file init_mix.faa -ps 8 -ng 3 -sm weak -b 20 -o /tmp/smoke
 ```
 Check: no "falling back" warnings; the `hemo` column varies; MACREL + HemoPI2 actually ran.
 
@@ -82,7 +82,7 @@ Check: no "falling back" warnings; the `hemo` column varies; MACREL + HemoPI2 ac
 nice -5 python pfes.py \
   --start file --start-file init_mix.faa \
   -ps 100 -ng 100 -sm weak -b 20 \
-  --seed 42 --norepeat --max-tokens-per-batch 4096 \
+  --norepeat --max-tokens-per-batch 4096 \
   -o results/macrel-structured 2>&1 | tee results/macrel-structured.log
 ```
 - **Hemolysis:** attribute-only by default (add `--hemo-in-score` to put it in the fitness).
@@ -108,10 +108,45 @@ Run the same command with a different `--start-file` (existing / random / mix) o
 | `--hemo-in-score` | off | put HemoPI2 hemolysis back into the fitness score |
 | `-ng` / `-ps` | 100 / 10 | generations / population size |
 | `-sm` / `-b` | weak / 1 | selection: `weak` (β via `-b`), `weak2`, `strong` |
-| `--seed` | none | RNG seed (identical start across branches) |
 | `--norepeat` | off | never re-evaluate a sequence already seen |
 | `-pl0 / -hl0 / -bl0` | 30 / 20 / 12 | length / helix / β penalty thresholds
 | `--max-tokens-per-batch` | 512 | fold batch size (use ~4096 to minimise classifier reloads) |
+
+## Reproducibility
+
+Runs are **not** reproducible, matching upstream PFES, which seeds no random number
+generator anywhere. Mutation, survivor sampling and random-sequence generation all
+draw from OS entropy, so the same command produces a different trajectory each time.
+Repeat runs are independent samples of the same process, which is what makes
+replication across runs meaningful, but an individual result cannot be regenerated
+and must be preserved from its log and `structures/` output.
+
+The starting population is the one thing that *is* fixed, and it is fixed by a file
+rather than by a seed: build it once with `amp_db.py --make-init` and pass the same
+`--start-file` to every arm.
+
+## Known constraints
+
+**MACREL is defined for 10–100 residues.** Outside that window `macrel_score_batch`
+falls back to the `calculate_samp` biophysical proxy, silently, per sequence. The
+objective therefore changes identity mid-run if chains grow past 100 aa. This is not
+hypothetical: the `foldonly` arm reached **93 residues by generation 300**. Fold-only
+runs should not be extended much beyond 300 generations without either capping length
+or logging which scorer produced each value.
+
+**Deduplication cost grows quadratically.** `--norepeat` scans the full
+`ancestral_memory` for every candidate, and that table gains `pop_size` rows per
+generation. Doubling the generation count roughly quadruples the dedup work, so
+runtime does not scale linearly in `-ng`.
+
+**Measured CPU throughput** (12 threads, `--max-tokens-per-batch 4096`, pop 100):
+
+| Arm | s / candidate | h / 300 generations |
+|---|---|---|
+| structured | 1.70 | 14.2 |
+| fold-only | 2.14 | 17.8 |
+
+Fold-only is the more expensive arm because folding cost rises with chain length.
 
 ## Output (`<outdir>/progress.log`, tab-separated)
 `gndx` generation · `seq_len` · `prot_len_penalty` `max_alpha_penalty` `max_beta_penalty` · `ptm` `mean_plddt` (ESM3) · `num_conts` · `amp_prob` (MACREL) · **`hemo_prob` (HemoPI2 — the attribute)** · `score` · `sequence` · `mutation` · `ss`. Structures: gzipped PDB in `<outdir>/structures/`.

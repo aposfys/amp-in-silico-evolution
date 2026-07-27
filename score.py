@@ -509,6 +509,20 @@ def macrel_score_batch(sequences):
                 str(row['Sequence']): float(row['AMP_probability'])
                 for _, row in df.iterrows()
             }
+            # MACREL is defined for 10-100 residues and silently omits anything
+            # outside that window, in which case the biophysical proxy is
+            # substituted below. That substitution changes what the objective
+            # measures, so it must not pass unnoticed in a long run. Reported
+            # here only; no behaviour or log-schema change.
+            missing = [s for s in sequences if s not in seq_map]
+            if missing:
+                lens = sorted({len(s) for s in missing})
+                sys.stderr.write(
+                    f'  Warning: MACREL returned no score for {len(missing)}/'
+                    f'{len(sequences)} sequence(s), lengths {lens[0]}-{lens[-1]}. '
+                    'Biophysical proxy substituted for those (MACREL covers '
+                    '10-100 residues).\n'
+                )
             return {
                 seq: (seq_map.get(seq, fallback[seq][0]),
                       hemo_scores[seq])
