@@ -406,3 +406,27 @@ FodyWeavers.xsd
 
 # PFES AMP seed cache (built via `python amp_db.py --fetch/--import`)
 /data/dbaasp.faa
+
+# ---------------------------------------------------------------------------
+# PFES-AMPs: generated output
+# Run directories are large and reproducible from the command line; only the
+# worked example under results_macrel_pfes_300/ is tracked.
+# ---------------------------------------------------------------------------
+results/
+results_2x2/
+results_300/
+results_300nh/
+results_macrel_300/
+results/final/
+comparison_plots_300/
+
+# reports and slides built by analysis/make_word.py and analysis/make_ppt.py
+*.docx
+*.pptx
+
+# scratch figures written to the repo root
+/new_*.png
+/loop_diagram.png
+
+# editor / agent state
+.claude/

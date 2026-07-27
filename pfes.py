@@ -725,11 +725,6 @@ if __name__ == '__main__':
             "Default 512 is conservative and safe for CPU runs."
     )
     parser.add_argument(
-            '--seed', type=int, default=None,
-            help='RNG seed for reproducibility. Use the SAME seed (and the same start) '
-                 'across branches so they start identically and mutate comparably.',
-    )
-    parser.add_argument(
             '--start', choices=['random', 'randoms', 'existing', 'mix', 'file', 'seq'],
             default=None,
             help='HIGH-LEVEL choice of the starting population (overrides -iseq): '
@@ -779,13 +774,6 @@ if __name__ == '__main__':
             args.initial_seq = f'file:{args.start_file}'
         elif args.start == 'seq':
             pass  # use whatever -iseq provided
-
-    # Seed all RNGs before any random use (seeding, mutation, selection) so runs
-    # are reproducible and the 2x2 branches can share an identical start.
-    if args.seed is not None:
-        import random as _random
-        _random.seed(args.seed)
-        np.random.seed(args.seed)
 
     evolver = Evolver(args.evoldict)
 
@@ -847,7 +835,7 @@ if __name__ == '__main__':
         init_path = args.initial_seq.split(':', 1)[1]
         if not os.path.isfile(init_path):
             print(f"  Error: init population file not found: {init_path}")
-            print(f"  Build it with:  python amp_db.py --make-init --pop {args.pop_size} --seed {args.seed} -o {init_path}")
+            print(f"  Build it with:  python amp_db.py --make-init --pop {args.pop_size} -o {init_path}")
             sys.exit(1)
         recs = amp_db.parse_fasta(init_path)
         if not recs:
