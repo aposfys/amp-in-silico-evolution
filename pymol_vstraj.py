@@ -57,9 +57,20 @@ pdbs=sorted_alphanumeric(os.listdir(pdb_dir))
 #     pdbid = gen1[gen1.score == gen1.score.max()].head(1).id.item()
 #     pdbs.append(pdbid +'.pdb')
 
-pdbs = pdbs[0:len(pdbs):2] #selec every one change 1 to 2 to select every 2th
+# Upstream takes every 2nd structure, which suits the long lineages it evolved
+# (500-800 steps, so 250-400 frames). A peptide run produces far fewer: a
+# 35-step lineage halved gives 17 frames, i.e. 1.7 s of video.
+#
+# Keep upstream's step of 2 wherever it still yields a watchable animation, and
+# fall back to every structure only when the lineage is too short to bear
+# halving. Long runs therefore render exactly as they did before.
+MIN_FRAMES = 60
+step = 2 if len(pdbs) // 2 >= MIN_FRAMES else 1
+pdbs = pdbs[0:len(pdbs):step]
 
 n = len(pdbs)
+print(f'lineage {len(sorted_alphanumeric(os.listdir(pdb_dir)))} structures, '
+      f'step {step} -> {n} frames ({n * 0.1:.1f} s)')
 
 
 print(f'{n} structures will be rendered')
@@ -80,16 +91,22 @@ print(f'pLDDT scale detected: 0-{PLDDT_MAX:g} '
 # cmd.spectrum("b", "blue_white_red",  'pdb_0' and "chain A")
 #view = cmd.get_view(0) # or set view from pymol
 
-view = (\
-    -0.187737256,    0.912775278,   -0.362755269,\
-     0.289764911,    0.404352784,    0.867484272,\
-     0.938501596,    0.057745360,   -0.340403259,\
-     0.000000000,    0.000000000, -231.963638306,\
-     0.568006516,    0.961885452,   -0.382167816,\
-   180.984054565,  282.943267822,  -20.000000000 )
-
-# cmd.set_view(view)
-# cmd.png('frames/frame_0.png', width=800, height=600, dpi=30)
+# Upstream pasted in a camera matrix captured by hand from a PyMOL session and
+# tuned for the ~100-residue globular domains it evolved: the camera sits 232 A
+# back. A 26-residue peptide spans about 31 A and would occupy 13% of the frame
+# width, a speck in the middle of white space.
+#
+# Fit the view to the molecules instead. The first and last structures of the
+# lineage are framed together, so the view accommodates the whole trajectory
+# including any growth (the fold-only arm runs from 24 to 68 residues). The
+# result is then held FIXED for every frame, exactly as upstream does, so the
+# peptide appears to evolve rather than the camera to drift.
+cmd.load(f'{pdb_dir}/{pdbs[-1]}', 'pdb_last')
+cmd.align('pdb_last', 'pdb_0')
+cmd.orient('pdb_0 or pdb_last')
+cmd.zoom('pdb_0 or pdb_last', buffer=4.0)
+view = cmd.get_view()
+cmd.delete('pdb_last')
 
 
 print(pdbs)
@@ -120,8 +137,14 @@ for pdb in pdbs:
 clips = [ImageClip(frames + m).set_duration(0.1)
            for m in sorted_alphanumeric(os.listdir(frames))]
 
-concat_clip = concatenate_videoclips(clips, 
-                                     method="compose", 
+concat_clip = concatenate_videoclips(clips,
+                                     method="compose",
                                      bg_color=(255, 255, 255))
 concat_clip.write_videofile(f'{wdname}.mp4', 24)
+
+# The upstream README embeds a .gif, but the script only ever wrote an .mp4 and
+# the conversion was done outside the repository. Write both, so the animation
+# that goes in a README or a slide is reproducible from this script alone.
+concat_clip.write_gif(f'{wdname}.gif', fps=10)
+print(f'wrote {wdname}.mp4 and {wdname}.gif')
 
