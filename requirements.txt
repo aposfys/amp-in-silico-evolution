@@ -1,11 +1,32 @@
+# PFES-AMPs
+#
+# The upper bounds below are not tidiness. Each marks a version that broke the
+# pipeline silently, producing wrong numbers rather than an error.
+
 torch
 esm
-numpy
-pandas
 matplotlib
 tqdm
 MDAnalysis
 moviepy
-macrel
 peptides
 hemopi2
+
+# numpy 2 breaks HemoPI2's pickled scikit-learn models.
+numpy<2
+
+# pandas 3 changed weighted sampling, which is why evolution.select() draws
+# survivors with numpy rather than DataFrame.sample. Left unpinned because the
+# fork no longer relies on the old behaviour, but check this version first if
+# selection ever looks wrong.
+pandas
+
+# MACREL 1.6.0 moved its models to ONNX. onnxruntime 1.26 changed the shape of
+# the `output_probability` output, so
+#     amp_prob = np.array([x['AMP'] for x in amp_prob])
+# returns raw decision values instead of calibrated probabilities: magainin 2
+# came back at -0.050 and was classified NOT an AMP, and every candidate then
+# fell through to the biophysical surrogate. The bound is MACREL's own, from its
+# pyproject.toml; conda will install past it unless told otherwise.
+macrel>=1.6.1
+onnxruntime<=1.25.1

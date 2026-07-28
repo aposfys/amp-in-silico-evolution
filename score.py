@@ -520,12 +520,28 @@ def macrel_score_batch(sequences):
                 str(row['Sequence']): float(row['AMP_probability'])
                 for _, row in df.iterrows()
             }
+            # MACREL reports the NORMALISED sequence, not the one it was given.
+            # macrel_features.normalize_seq strips a leading methionine (it was
+            # written for ORFs, where M is the start codon) and a trailing stop
+            # character:
+            #     if seq[0] == 'M':  seq = seq[1:]
+            #     if seq[-1] == '*': seq = seq[:-1]
+            # Looking up the original string therefore misses every candidate
+            # that begins with M, which is about one in twenty, and each of
+            # those silently falls through to the biophysical surrogate.
+            def macrel_key(s):
+                if s and s[0] == 'M':
+                    s = s[1:]
+                if s and s[-1] == '*':
+                    s = s[:-1]
+                return s
+
             # MACREL is defined for 10-100 residues and silently omits anything
             # outside that window, in which case the biophysical proxy is
             # substituted below. That substitution changes what the objective
             # measures, so it must not pass unnoticed in a long run. Reported
             # here only; no behaviour or log-schema change.
-            missing = [s for s in sequences if s not in seq_map]
+            missing = [s for s in sequences if macrel_key(s) not in seq_map]
             if missing:
                 lens = sorted({len(s) for s in missing})
                 sys.stderr.write(
@@ -536,7 +552,7 @@ def macrel_score_batch(sequences):
                     'MACREL\'s 10-100 residue range.\n'
                 )
             return {
-                seq: (seq_map.get(seq, fallback[seq][0]),
+                seq: (seq_map.get(macrel_key(seq), fallback[seq][0]),
                       hemo_scores[seq])
                 for seq in sequences
             }
