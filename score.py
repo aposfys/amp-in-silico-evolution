@@ -486,8 +486,19 @@ def macrel_score_batch(sequences):
                 clean_env = {k: v for k, v in os.environ.items()
                              if not k.startswith('Malloc')}
                 result = subprocess.run(
+                    # --keep-negatives is REQUIRED here. Macrel's default is to
+                    # emit only the sequences it classifies as AMP:
+                    #     if not keep_negatives:
+                    #         final = final.query('is_AMP').drop('is_AMP', axis=1)
+                    # (macrel/AMP_predict.py). Without the flag every sequence
+                    # below the classifier's decision threshold is absent from
+                    # the output, gets no score, and silently falls through to
+                    # the biophysical surrogate. That is fatal for an
+                    # optimisation target: the whole point is to read a
+                    # probability for candidates that are NOT yet antimicrobial
+                    # and let selection climb the gradient.
                     ['macrel', 'peptides', '--fasta', fasta_path,
-                     '--output', tmpdir, '--force'],
+                     '--output', tmpdir, '--force', '--keep-negatives'],
                     capture_output=True, text=True, timeout=300,
                     env=clean_env
                 )
@@ -520,8 +531,9 @@ def macrel_score_batch(sequences):
                 sys.stderr.write(
                     f'  Warning: MACREL returned no score for {len(missing)}/'
                     f'{len(sequences)} sequence(s), lengths {lens[0]}-{lens[-1]}. '
-                    'Biophysical proxy substituted for those (MACREL covers '
-                    '10-100 residues).\n'
+                    'Biophysical proxy substituted for those. Check that '
+                    '--keep-negatives is passed and that lengths are within '
+                    'MACREL\'s 10-100 residue range.\n'
                 )
             return {
                 seq: (seq_map.get(seq, fallback[seq][0]),
