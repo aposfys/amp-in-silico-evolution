@@ -142,7 +142,7 @@ def _print_startup(args, evolver, date_now, time_now):
     print(f"  init seq:   {init_display}  (rand_len={args.random_seq_len})")
     print(f"  penalties:  len≥{args.prot_len_penalty}  helix≥{args.helix_len_penalty}  beta≥{args.beta_len_penalty}")
     _hemo = "×(1-hemo)" if args.hemo_in_score else "hemo=attribute-only (not in score)"
-    print(f"  scoring:    pLDDT×pTM×len_pen×helix_pen×beta_pen×AMP{'×(1-hemo)' if args.hemo_in_score else ''}×contacts  [MACREL AMP + PFES; {_hemo}]")
+    print(f"  scoring:    pLDDT×pTM×len_pen×helix_pen×beta_pen{'×(1-hemo)' if args.hemo_in_score else ''}×contacts  [original PFES objective, no activity term; {_hemo}]")
     print(f"  output:     {args.outpath}/{args.log}")
     print(f"{'═'*_W}\n")
 
@@ -223,6 +223,11 @@ def extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_s
             f.write(pdb_txt.encode())
 
         #=======================================================================#
+        # ORIGINAL PFES OBJECTIVE. The activity term is deliberately absent:
+        # this arm reproduces the fitness of Sahakyan et al. with ESM3 in place
+        # of ESMFold, so that the contribution of MACREL can be read off a
+        # single change against fitness-macrel-structured. amp_prob is still
+        # computed and logged, it simply does not drive selection.
         #================================SCORING================================#
         num_conts, _mean_plddt_ = get_nconts(pdb_txt, 'A', 8.0, 0.5) #plddt is better only for chain A and for residues > 50
 
@@ -251,7 +256,6 @@ def extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_s
                              prot_len_penalty,
                              max_beta_penalty,
                              max_alpha_penalty,
-                             amp_prob,
                              hemo_factor,
                              (num_conts + seq_len) / seq_len])
         else:
@@ -261,7 +265,6 @@ def extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_s
                              prot_len_penalty,
                              max_beta_penalty,
                              max_alpha_penalty,
-                             amp_prob,
                              hemo_factor,
                              (num_conts + seq_len) / seq_len,
                              (num_inter_conts + seq_len) / (seq_len + 1)])
