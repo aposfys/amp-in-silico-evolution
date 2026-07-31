@@ -134,8 +134,13 @@ def write_fasta(path, records):
     with open(path, "w") as fh:
         for name, seq in records:
             fh.write(f">{name}\n{seq}\n")
-    print(f"  wrote {path}  ({len(records)} sequences, "
-          f"{len(records[0][1])} aa)" if records else f"  wrote {path} (empty)")
+    if not records:
+        print(f"  wrote {path} (empty)")
+        return
+    lens = [len(s) for _, s in records]
+    span = (f"{min(lens)} aa" if min(lens) == max(lens)
+            else f"{min(lens)}-{max(lens)} aa, mean {sum(lens) / len(lens):.0f}")
+    print(f"  wrote {path}  ({len(records)} sequences, {span})")
 
 
 def clean(seq):
@@ -143,13 +148,31 @@ def clean(seq):
     return "".join(c for c in seq if c in AA)
 
 
+def parse_length(spec):
+    """`25` for one fixed length, `10-100` for a uniform range."""
+    if "-" in str(spec):
+        lo, hi = str(spec).split("-", 1)
+        lo, hi = int(lo), int(hi)
+        if lo < 1 or hi < lo:
+            raise ValueError(f"bad length range {spec}")
+        return lo, hi
+    return int(spec), int(spec)
+
+
 def cut(seq, length, rng):
-    """A random window of `length`, or None if the sequence is too short."""
+    """A random window of `length`, or None if the sequence is too short.
+
+    `length` is (lo, hi); the window length is drawn first and uniformly, so the
+    set's length distribution is the one asked for rather than one bent by which
+    proteins happened to be long enough.
+    """
+    lo, hi = length
     seq = clean(seq)
-    if len(seq) < length:
+    n = rng.randint(lo, hi)
+    if len(seq) < n:
         return None
-    start = rng.randint(0, len(seq) - length)
-    return seq[start:start + length]
+    start = rng.randint(0, len(seq) - n)
+    return seq[start:start + n]
 
 
 # --------------------------------------------------------------------------- #
@@ -177,8 +200,11 @@ def screen_amp(records, max_prob):
 
 # --------------------------------------------------------------------------- #
 def build_random(n, length, rng):
-    return [(f"rand{length}aa_{i}",
-             "".join(rng.choice(AA) for _ in range(length))) for i in range(n)]
+    out = []
+    for i in range(n):
+        k = rng.randint(*length)
+        out.append((f"rand{k}aa_{i}", "".join(rng.choice(AA) for _ in range(k))))
+    return out
 
 
 def get(url, timeout=120, tries=5):
@@ -273,10 +299,11 @@ def sample_conserved(n, length, rng, min_size, cache, tag="frag",
         if len(out) >= n:
             break
         tried += 1
-        members = cluster_members(c["Cluster ID"])
+        frag_len = rng.randint(*length)          # drawn before the entry, so the
+        members = cluster_members(c["Cluster ID"])   # distribution stays uniform
         members = [m for m in members
                    if not NAME_EXCLUDE.search(m.get("Protein names", ""))
-                   and len(clean(m.get("Sequence", ""))) >= length]
+                   and len(clean(m.get("Sequence", ""))) >= frag_len]
         if not members:
             empty += 1
             continue
@@ -288,13 +315,13 @@ def sample_conserved(n, length, rng, min_size, cache, tag="frag",
         entry = rng.choice(by_species[species])
 
         seq = clean(entry["Sequence"])
-        start = rng.randint(0, len(seq) - length)
-        frag = seq[start:start + length]
+        start = rng.randint(0, len(seq) - frag_len)
+        frag = seq[start:start + frag_len]
 
         organism = entry["Organism"].split(" (")[0].replace(" ", "_")
         phylum = PHYLUM_RE.search(entry.get("Taxonomic lineage", ""))
         name = (f"{tag}_{len(out) + offset:03d}_{entry['Entry']}_{organism}_"
-                f"{start + 1}-{start + length}")
+                f"{start + 1}-{start + frag_len}")
         out.append((name, frag))
         meta.append({
             "fragment": name,
@@ -306,7 +333,8 @@ def sample_conserved(n, length, rng, min_size, cache, tag="frag",
             "cluster_size": c["Size"],
             "common_taxon": c["Common taxon"],
             "source_length": len(seq),
-            "window": f"{start + 1}-{start + length}",
+            "fragment_length": frag_len,
+            "window": f"{start + 1}-{start + frag_len}",
             "sequence": frag,
         })
         seen_species[entry["Organism"].split(" (")[0]] = \
@@ -364,8 +392,10 @@ def main():
     ap.add_argument("--orfs", metavar="FASTA",
                     help="build the small-ORF set from a supplied FASTA")
     ap.add_argument("--pop", type=int, default=100)
-    ap.add_argument("--len", type=int, default=25, dest="length",
-                    help="length every set is cut to (default 25)")
+    ap.add_argument("--len", default="25", dest="length",
+                    help="fragment length: one number for a fixed length, or "
+                         "MIN-MAX for a uniform random length per sequence "
+                         "(e.g. 10-100, the range MACREL is defined over)")
     ap.add_argument("--min-cluster-size", type=int, default=100,
                     help="a UniRef50 cluster must hold at least this many "
                          "entries to count as conserved (default 100)")
@@ -384,6 +414,10 @@ def main():
 
     if not (args.random or args.uniprot or args.orfs):
         ap.error("choose at least one of --random, --uniprot, --orfs")
+    try:
+        args.length = parse_length(args.length)
+    except ValueError as e:
+        ap.error(str(e))
 
     rng = random.Random(args.seed)
     os.makedirs(args.outdir, exist_ok=True)
