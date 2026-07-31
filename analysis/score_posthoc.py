@@ -117,6 +117,61 @@ def amplify_scores(sequences, model="balanced"):
     return {}
 
 
+def potency_scores(sequences):
+    """Predicted log10(MIC in µg/mL) from EvoGradient's regression model.
+
+    MACREL, AMPlify and HemoPI2 are all classifiers: they answer whether a
+    peptide is antimicrobial, not how strongly. EvoGradient ships a regression
+    model trained on measured MICs, which puts candidates on a concentration
+    scale instead of a probability one. Values are log10(µg/mL), censored at
+    log10(8192) = 3.913 for peptides with no measurable activity, so LOWER is
+    more potent.
+
+    Needs the repository cloned and its own environment, as with AMPlify:
+
+        export EVOGRADIENT_DIR=/path/to/AMP-potency-prediction-EvoGradient
+        export EVOGRADIENT_CMD="conda run -n evograd python"
+
+    Returns {} and says so if either is unset, rather than failing.
+    """
+    if not sequences:
+        return {}
+    root = os.environ.get("EVOGRADIENT_DIR", "")
+    if not root or not os.path.isfile(os.path.join(root, "AMP_regression.py")):
+        sys.stderr.write(
+            "  potency skipped: set EVOGRADIENT_DIR to the cloned "
+            "AMP-potency-prediction-EvoGradient repository.\n")
+        return {}
+    import pandas as pd
+    cmd = shlex.split(os.environ.get("EVOGRADIENT_CMD", "python"))
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            fa = os.path.join(tmp, "in.fasta")
+            out = os.path.join(tmp, "potency.csv")
+            with open(fa, "w") as fh:
+                for i, s in enumerate(sequences):
+                    fh.write(f">seq{i}\n{s}\n")
+            r = subprocess.run(cmd + [os.path.join(root, "AMP_regression.py"),
+                                      "--testPath", fa, "--savePath", out],
+                               capture_output=True, text=True, timeout=1800,
+                               cwd=root)
+            if r.returncode != 0 or not os.path.isfile(out):
+                raise RuntimeError((r.stderr or r.stdout).strip()[:300])
+            df = pd.read_csv(out)
+            # column naming is not documented and has drifted between releases,
+            # so locate the sequence and value columns rather than assume them
+            seqcol = next((c for c in df.columns
+                           if "seq" in str(c).lower()), None)
+            valcol = next((c for c in df.columns
+                           if c != seqcol and pd.api.types.is_numeric_dtype(df[c])), None)
+            if seqcol is None or valcol is None:
+                raise ValueError(f"unexpected columns {list(df.columns)}")
+            return {str(a): float(b) for a, b in zip(df[seqcol], df[valcol])}
+    except Exception as e:
+        sys.stderr.write(f"  potency skipped ({type(e).__name__}: {e}).\n")
+    return {}
+
+
 def macrel_hemo(sequences):
     """MACREL probability and HemoPI2 risk, via the repository's own score.py."""
     try:
@@ -254,15 +309,17 @@ def main():
     print("scoring...")
     mac, hemo = macrel_hemo(seqs)
     amp = amplify_scores(seqs, args.model)
+    pot = potency_scores(seqs)
     for r in recs:
         s = r["sequence"]
         r["macrel"] = mac.get(s, r["macrel_logged"])
         r["hemopi2"] = hemo.get(s, float("nan"))
         r["amplify"] = amp.get(s, float("nan"))
+        r["log10_mic"] = pot.get(s, float("nan"))
 
     os.makedirs(args.outdir, exist_ok=True)
     cols = ["run", "arm", "length", "charge", "hydrophobic", "helix", "score",
-            "macrel", "amplify", "hemopi2", "sequence"]
+            "macrel", "amplify", "hemopi2", "log10_mic", "sequence"]
     with open(os.path.join(args.outdir, "posthoc_scores.tsv"), "w") as fh:
         fh.write("\t".join(cols) + "\n")
         for r in sorted(recs, key=lambda x: (-x["score"],)):
