@@ -34,9 +34,9 @@ from matplotlib.lines import Line2D
 
 # Okabe-Ito, colour-vision safe. Structured blue, fold-only orange, as in the
 # thesis figures so the two sets can sit side by side.
-C = {"structured": "#0072B2", "foldonly": "#E69F00"}
+C = {"pfes-macrel": "#0072B2", "pfes": "#E69F00"}
 C_INK, C_GRID, C_MUTE = "#22262B", "#E5E8EC", "#9AA1AE"
-LABEL = {"structured": "Structured", "foldonly": "Fold-only"}
+LABEL = {"pfes-macrel": "PFES + MACREL", "pfes": "PFES only"}
 
 
 # --------------------------------------------------------------------------- #
@@ -73,22 +73,23 @@ def gen_of(row):
 def detect_arm(rows, name_hint):
     """Identify the objective by reconstructing it from the logged columns.
 
-    The structured objective multiplies in the three penalties and the contact
-    booster; the fold-only one does not. Whichever reproduces `score` is the arm.
+    Both arms carry the geometric penalties and the contact booster; they differ
+    only in whether the MACREL probability multiplies in. Reconstruct each and
+    take whichever reproduces `score`.
     """
-    errs = {"structured": [], "foldonly": []}
+    errs = {"pfes": [], "pfes-macrel": []}
     for r in rows[:3000]:
         L, N = fnum(r, "seq_len"), fnum(r, "num_conts")
         if not np.isfinite(L) or L <= 0:
             continue
-        base = fnum(r, "ptm") * fnum(r, "mean_plddt") * fnum(r, "amp_prob")
-        struct = (base * fnum(r, "prot_len_penalty") * fnum(r, "max_alpha_penalty")
-                  * fnum(r, "max_beta_penalty") * ((N + L) / L))
+        base = (fnum(r, "ptm") * fnum(r, "mean_plddt")
+                * fnum(r, "prot_len_penalty") * fnum(r, "max_alpha_penalty")
+                * fnum(r, "max_beta_penalty") * ((N + L) / L))
         s = fnum(r, "score")
-        errs["structured"].append(abs(struct - s))
-        errs["foldonly"].append(abs(base - s))
-    if not errs["structured"]:
-        return name_hint or "structured", float("nan")
+        errs["pfes"].append(abs(base - s))
+        errs["pfes-macrel"].append(abs(base * fnum(r, "amp_prob") - s))
+    if not errs["pfes"]:
+        return name_hint or "pfes-macrel", float("nan")
     means = {k: float(np.nanmean(v)) for k, v in errs.items()}
     arm = min(means, key=means.get)
     if name_hint and name_hint != arm:
@@ -106,8 +107,8 @@ def load_run(path):
     if not rows:
         return None
     base = os.path.basename(path.rstrip("/"))
-    hint = ("foldonly" if "foldonly" in base or "fold-only" in base
-            else "structured" if "structured" in base else None)
+    hint = ("pfes-macrel" if "macrel" in base.lower()
+            else "pfes" if "pfes" in base.lower() else None)
     arm, resid = detect_arm(rows, hint)
     return {"name": base, "path": path, "arm": arm, "rows": rows, "resid": resid}
 
