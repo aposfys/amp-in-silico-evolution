@@ -17,28 +17,46 @@ Each is fed to a run as a fixed starting population:
 python pfes.py --start file --start-file init/init_fragments.faa -pop 100 ...
 ```
 
-## Length
+## Two length variants
 
-| Set | Length |
-|---|---|
-| `init_random.faa` | fixed 25 aa |
-| `init_fragments.faa` | uniform random, 10–100 aa (median 51, observed 11–99) |
+The sets exist in two versions, cut by the same code from the same sampling
+frame and differing only in the length of the window.
 
-The fragments are cut at a random length as well as a random position, over the
-range MACREL is defined for. The window length is drawn *before* the source
-protein is chosen, so the distribution is the one asked for rather than one bent
-towards long windows by which proteins happened to be long enough to supply them.
+| Directory | Cut | Median `P_len` at generation 0 |
+|---|---|---|
+| `init/` | fixed 25 aa | 0.731 |
+| `init_varlen/` | uniform random 10–100 aa | 0.015 |
 
-Note what this costs, since it is the reason the earlier version of these sets
-was cut to one length. Length is a confound: the structured objective penalises
-anything past `-pl0` (30 aa), so roughly two thirds of these fragments start with
-a length penalty the 25 aa random set never pays, and a difference between the
-two sets will be part origin and part length. Reading the comparison therefore
-means conditioning on length rather than comparing the two sets wholesale, or
-rebuilding the random set over the same range:
+`init/` is the version to run a comparison on. `init_varlen/` implements random
+cutting in the fullest sense, at random length as well as random position, over
+the range MACREL is defined for. The reason it is kept separate is below, and it
+is not the general point that length is a confound.
+
+The structured fitness carries `P_len = 1 − sigmoid(L, pl0, 0.2)` with
+`pl0 = 30` (`pfes.py:242`), which is `1 / (1 + e^{0.2(L − 30)})`:
+
+| L | 15 | 25 | 30 | 40 | 50 | 70 | 100 |
+|---|---|---|---|---|---|---|---|
+| `P_len` | 0.95 | 0.73 | 0.50 | 0.119 | 0.018 | 0.00034 | 0.0000008 |
+
+In `init_varlen/` the median fragment is 51 aa, so its median `P_len` is 0.015
+and 49 of the 100 fragments start below 0.01. Since the fitness is a product,
+half the set scores essentially zero at generation zero, and under
+`--selection_mode strong`, a straight truncation to the top `pop_size`, it is
+gone in the first round. Two things then break. The run stops measuring where
+sequence came from and starts measuring which fragments happened to be short.
+And because the long ones go at once, the arm collapses to a few dozen genuinely
+competitive individuals, an unequal starting *sample size* that no later
+conditioning on length repairs. Its random set is drawn over the same 10–100 so
+the two arms at least match each other, but both are crippled in the same way,
+which fixes the comparison and not the experiment.
+
+If the requirement is that cutting be random and the run still has to be
+informative, the middle range is 15–30, where the penalty is present but
+functional, `P_len` from 0.95 to 0.50:
 
 ```bash
-python analysis/make_init_sets.py --random --pop 100 --len 10-100 --seed 42 -o init/
+python analysis/make_init_sets.py --random --uniprot --pop 100 --len 15-30 --seed 42 --no-screen -o init_1530/
 ```
 
 ## How each was built
@@ -55,7 +73,7 @@ which is what independent random draws give.
 ### `init_fragments.faa`
 
 ```bash
-python analysis/make_init_sets.py --uniprot --pop 100 --len 10-100 --seed 42 --no-screen -o init/
+python analysis/make_init_sets.py --uniprot --pop 100 --len 25 --seed 42 --no-screen -o init/
 ```
 
 **Conserved, defined as a UniRef50 cluster old enough to predate the split
@@ -68,7 +86,7 @@ whose common ancestor is Bilateria or older — Bilateria, Eumetazoa, Metazoa,
 Opisthokonta, Eukaryota or cellular organisms. A cluster whose ancestor is
 Mammalia or Euteleostomi is rejected however large it is, because it is
 conserved within one lineage rather than across many species. The 100 clusters
-actually used have a median size of 362 members and reach 3,016.
+actually used have a median size of 360 members and reach 3,016.
 
 **Sampling is family-first.** Clusters are shuffled under the seed and walked in
 order; one Swiss-Prot entry is taken from each. Sampling entries directly does
@@ -98,17 +116,17 @@ complement, Toll and lectin. GAPDH is a worked example of why the GO filter
 earns its place: it passes every keyword, and is removed by GO:0006952, which it
 carries because its own fragments are antimicrobial in fish.
 
-One random window per protein, at a random length. Headers keep the provenance:
+One random window per protein. Headers keep the provenance:
 `frag_001_O00159_Homo_sapiens_803-827` gives accession, organism and the residue
 range cut. `init_fragments.tsv` carries the same 100 rows with the source protein
 name, phylum, UniRef50 cluster, cluster size, common taxon, source length and
-fragment length.
+window.
 
 What comes out is housekeeping machinery — V-type ATPase subunit d2, COP9
 signalosome subunit 3, dynein axonemal heavy chain 1, GMP reductase 1,
-multifunctional protein CAD. 100 species-diverse families across six phyla:
+multifunctional protein CAD, 26S proteasome subunit Rpn3. 100 species-diverse families across six phyla:
 Chordata 84, Arthropoda 12, and one each of Mollusca, Echinodermata, Cnidaria
-and Nematoda, from 25 source species. The chordate share reflects Swiss-Prot's
+and Nematoda, from 24 source species. The chordate share reflects Swiss-Prot's
 curation, not the sampling frame; the *families* are bilaterian-wide by
 construction, whichever species the sequence was read from.
 
@@ -122,12 +140,13 @@ change that would tighten this, if the distinction ever matters to a result.
 Not yet built. Once the source FASTA arrives:
 
 ```bash
-python analysis/make_init_sets.py --orfs <source.faa> --pop 100 --len 10-100 --seed 42 -o init/
+python analysis/make_init_sets.py --orfs <source.faa> --pop 100 --len 25 --seed 42 -o init/
 ```
 
-Same cutting logic, one window per ORF, and `--len` should be whatever range the
-fragment set was cut to, so the two sets that both come from real sequence are at
-least comparable to each other.
+Same cutting logic, one window per ORF, and whichever `--len` the other two
+sets in that directory were cut to — 25 for `init/`, `10-100` for
+`init_varlen/`. An arm cut to a different distribution from the arms it is
+compared against is measuring length, not origin.
 
 ## Outstanding: the AMP screen
 
@@ -154,20 +173,21 @@ sets filtered to different standards.
 
 ## Composition
 
-| Set | Length | Mean charge | Charge range | Hydrophobic |
-|---|---|---|---|---|
-| random | 25 | +0.22 | −4.0 to +5.2 | 41% |
-| fragments | 11–99, median 51 | +0.61 | −7.6 to +14.0 | 40% |
+| Set | Length | Mean charge | Charge range | Hydrophobic | Pairwise identity |
+|---|---|---|---|---|---|
+| random | 25 | +0.22 | −4.0 to +6.1 | 41% | 4.9% |
+| fragments | 25 | −0.24 | −5.0 to +5.1 | 38% | 5.8% |
 
-Hydrophobic is the fraction of AVLIMFWC; both rows are computed the same way.
-Charge is net charge at pH 7, and is not normalised by length, so the fragments'
-wider range is partly the longer sequences and partly the fact that real protein
-regions are locally charged in a way independent draws are not. Hydrophobic
-content is near identical, so neither set starts with the amphipathic composition
-an AMP needs — which is the property the runs are meant to evolve.
+Hydrophobic is the fraction of AVLIMFWC and charge is net charge at pH 7; both
+rows are computed the same way. The two sets are matched in length and close in
+mean charge and hydrophobic content, so neither starts with the amphipathic
+composition an AMP needs, which is the property the runs are meant to evolve.
+They differ where real sequence differs from random: the fragments carry natural
+amino-acid usage, L, A, E, K, S, V most frequent, against a flat distribution in
+the random set, and a charge range of −5.0 to +5.1 that is skewed
+negative where the random set's is not, because real protein regions are locally
+charged in a way independent draws are not.
 
-The fragments carry natural amino-acid usage, L, A, E, K, S, V most frequent,
-against a flat distribution in the random set. Pairwise identity is not quoted
-for the fragments because the sequences differ in length; the guarantee that
-replaces it is stronger, namely that the 100 fragments come from 100 distinct
-UniRef50 families and 100 distinct proteins.
+Pairwise identity near 5% in both confirms no family is over-represented, and for
+the fragments the construction guarantees it anyway: 100 distinct UniRef50
+families and 100 distinct proteins.
