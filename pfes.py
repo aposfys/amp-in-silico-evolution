@@ -142,7 +142,7 @@ def _print_startup(args, evolver, date_now, time_now):
     print(f"  init seq:   {init_display}  (rand_len={args.random_seq_len})")
     print(f"  penalties:  len≥{args.prot_len_penalty}  helix≥{args.helix_len_penalty}  beta≥{args.beta_len_penalty}")
     _hemo = "×(1-hemo)" if args.hemo_in_score else "hemo=attribute-only (not in score)"
-    print(f"  scoring:    pLDDT×pTM×len_pen×helix_pen×beta_pen×AMP{'×(1-hemo)' if args.hemo_in_score else ''}×contacts  [MACREL AMP + PFES; {_hemo}]")
+    print(f"  scoring:    pLDDT×pTM×AMP{'×(1-hemo)' if args.hemo_in_score else ''}  [fold confidence + MACREL, NO structural terms; {_hemo}]")
     print(f"  output:     {args.outpath}/{args.log}")
     print(f"{'═'*_W}\n")
 
@@ -246,25 +246,22 @@ def extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_s
 
         if args.evolution_mode == "single_chain":
             # iplddt and inter-chain contact term are always 1.0 for single chains — omit them.
+            # FOLD CONFIDENCE x ACTIVITY, with no structural regularisation.
+            # The geometric penalties and the contact booster are computed and
+            # logged but do not drive selection, so the search is free to grow
+            # the chain if fold confidence and predicted activity reward it.
+            # Paired against fitness-pfes-macrel, which is this plus the
+            # structural terms, it isolates what those terms contribute.
             score = np.prod([mean_plddt,
                              ptm,
-                             prot_len_penalty,
-                             max_beta_penalty,
-                             max_alpha_penalty,
                              amp_prob,
-                             hemo_factor,
-                             (num_conts + seq_len) / seq_len])
+                             hemo_factor])
         else:
             score = np.prod([mean_plddt,
                              ptm,
                              iplddt,
-                             prot_len_penalty,
-                             max_beta_penalty,
-                             max_alpha_penalty,
                              amp_prob,
-                             hemo_factor,
-                             (num_conts + seq_len) / seq_len,
-                             (num_inter_conts + seq_len) / (seq_len + 1)])
+                             hemo_factor])
         #================================SCORING================================#
         #=======================================================================#
 
