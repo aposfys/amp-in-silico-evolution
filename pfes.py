@@ -234,9 +234,9 @@ def extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_s
         ss, max_helix, max_beta = pypsique(pdb_txt, 'A')
         #Rg, aspher = get_aspher(pdb_txt)
         #dG = dGscore(pdbtxt2bbcoord(pdb_txt), seq)
-        prot_len_penalty =  1 - sigmoid(seq_len, args.prot_len_penalty, 0.2)
+        prot_len_penalty =  1 - sigmoid(seq_len, args.prot_len_penalty, 0.12)
         max_alpha_penalty = 1 - sigmoid(max_helix, args.helix_len_penalty, 0.5)
-        max_beta_penalty = 1 - sigmoid(max_beta, args.beta_len_penalty, 0.6)
+        max_beta_penalty = 1 - sigmoid(max_beta, args.beta_len_penalty, 0.5)
 
         # MACREL AMP probability. HemoPI2 hemolysis is ALWAYS computed and logged as an
         # attribute (the hemo_prob column). By DEFAULT it does NOT drive selection
