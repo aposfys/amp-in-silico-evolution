@@ -349,10 +349,10 @@ def sample_conserved(n, length, rng, min_size, cache, tag="frag",
 
 def build_fragments(source, n, length, rng, tag):
     """One random window per protein, so fragments are maximally independent."""
-    pool = [(nm, s) for nm, s in source if len(clean(s)) >= length]
+    pool = [(nm, s) for nm, s in source if len(clean(s)) >= length[0]]
     if len(pool) < n:
         sys.stderr.write(
-            f"  only {len(pool)} sequences are at least {length} aa; "
+            f"  only {len(pool)} sequences are at least {length[0]} aa; "
             f"windows will be reused across the shortfall\n")
     rng.shuffle(pool)
     out, i = [], 0

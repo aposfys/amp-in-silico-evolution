@@ -427,3 +427,5 @@ comparison_plots_300/
 # scratch figures written to the repo root
 /new_*.png
 /loop_diagram.png
+
+smprot_raw/
