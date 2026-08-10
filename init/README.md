@@ -7,64 +7,134 @@ from sequence that already encodes something else.
 
 | File | Origin | Status |
 |---|---|---|
-| `init_random.faa` | completely random, uniform over the 20 residues | ready |
+| `init_random.faa` | completely random, uniform over the 20 residues | ready, screened |
 | `init_orfs.faa` | small ORFs from metazoan transcriptomes | **awaiting the source FASTA** |
-| `init_fragments.faa` | fragments of conserved metazoan proteins that are not AMPs | ready |
+| `init_fragments.faa` | fragments of conserved metazoan proteins that are not AMPs | ready, screened |
 
 Each is fed to a run as a fixed starting population:
 
 ```bash
-python pfes.py --start file --start-file init/init_fragments.faa -pop 100 ...
+python pfes.py --start file --start-file init/init_fragments.faa -ps 100 ...
 ```
+
+## The AMP screen — applied
+
+These sets are meant to start *without* antimicrobial activity, so anything
+MACREL already calls an AMP is dropped. Both directories were built with
+`--max-amp-prob 0.5`, and the delivered files were verified against
+`macrel_score_batch`, the same function the run itself calls:
+
+| File | above 0.5 | median | max |
+|---|---|---|---|
+| `init/init_random.faa` | **0 / 100** | 0.188 | 0.495 |
+| `init/init_fragments.faa` | **0 / 100** | 0.139 | 0.495 |
+| `init_varlen/init_random.faa` | **0 / 100** | — | — |
+| `init_varlen/init_fragments.faa` | **0 / 100** | — | — |
+
+The maximum of exactly 0.495 in both `init/` files is the screen's signature:
+MACREL is a random forest, so its probabilities fall on a discrete grid, and a
+`< 0.5` cut leaves 0.495 as the largest admissible value.
+
+Screening changes which draws are accepted, which shifts the whole RNG stream
+downstream of the first rejection. A screened set is therefore **not a subset**
+of the unscreened draw made under the same seed — it is a different set of 100.
+The pre-screen draws are retained as `*.draw1_prescreen.faa` for comparison and
+are not used by any run. They hold 2 (random) and 4 (fragments) sequences above
+the threshold, maxima 0.564 and 0.604.
+
+> **Historical note.** An earlier revision of this file stated that the screen
+> had *not* been applied and that the sets were built with `--no-screen`. That
+> was true when it was written and was not updated when the sets were
+> regenerated with MACREL available. The production series of §3.2 ran on the
+> screened files listed above.
 
 ## Two length variants
 
 The sets exist in two versions, cut by the same code from the same sampling
 frame and differing only in the length of the window.
 
-| Directory | Cut | Median `P_len` at generation 0 |
-|---|---|---|
-| `init/` | fixed 25 aa | 0.731 |
-| `init_varlen/` | uniform random 10–100 aa | 0.015 |
+| Directory | Cut | Median length | Median `P_len` at `pl0 = 30` | at `pl0 = 100` |
+|---|---|---|---|---|
+| `init/` | fixed 25 aa | 25 | 0.65 | 1.00 |
+| `init_varlen/` | uniform random 10–100 aa | 55 (frag), 60 (rand) | 0.05 / 0.03 | 0.99 |
 
-`init/` is the version to run a comparison on. `init_varlen/` implements random
-cutting in the fullest sense, at random length as well as random position, over
-the range MACREL is defined for. The reason it is kept separate is below, and it
-is not the general point that length is a confound.
-
-The structured fitness carries `P_len = 1 − sigmoid(L, pl0, 0.2)` with
-`pl0 = 30` (`pfes.py:242`), which is `1 / (1 + e^{0.2(L − 30)})`:
+The structured fitness carries `P_len = 1 − sigmoid(L, pl0, c)` (`pfes.py:237`),
+which is `1 / (1 + e^{c(L − pl0)})`, a sigmoid equal to one half **at** `pl0`:
 
 | L | 15 | 25 | 30 | 40 | 50 | 70 | 100 |
 |---|---|---|---|---|---|---|---|
-| `P_len` | 0.95 | 0.73 | 0.50 | 0.119 | 0.018 | 0.00034 | 0.0000008 |
+| `pl0 = 30` | 0.86 | 0.65 | 0.50 | 0.231 | 0.083 | 0.008 | 0.0002 |
+| `pl0 = 100` | 1.000 | 1.000 | 1.000 | 0.999 | 0.998 | 0.973 | 0.500 |
 
-In `init_varlen/` the median fragment is 51 aa, so its median `P_len` is 0.015
-and 49 of the 100 fragments start below 0.01. Since the fitness is a product,
-half the set scores essentially zero at generation zero, and under
-`--selection_mode strong`, a straight truncation to the top `pop_size`, it is
-gone in the first round. Two things then break. The run stops measuring where
-sequence came from and starts measuring which fragments happened to be short.
-And because the long ones go at once, the arm collapses to a few dozen genuinely
-competitive individuals, an unequal starting *sample size* that no later
-conditioning on length repairs. Its random set is drawn over the same 10–100 so
-the two arms at least match each other, but both are crippled in the same way,
-which fixes the comparison and not the experiment.
+**The steepness is `c = 0.12`, not the upstream `0.2`.** A logistic falls from
+0.9 to 0.1 over `2·ln9/c` residues — 22 residues at `c = 0.2`, 37 at `c = 0.12`
+— *regardless of* `pl0`. Against the published 250-residue target of upstream
+PFES, 22 residues is a narrow wall at the threshold; against a 30-residue target
+it spans the whole class and clips its upper half. The value here follows the
+rule derived in §2.4.7.1 of the thesis: `pl0` is the midpoint of the published
+length range of the target class and `c` is set so the 90→10% transition spans
+that range, which for antimicrobial peptides at 12–50 residues gives 31 and
+0.116, rounded to 30 and 0.12. The β-strand steepness is likewise 0.5 rather
+than 0.6, restoring the published value.
 
-If the requirement is that cutting be random and the run still has to be
-informative, the middle range is 15–30, where the penalty is present but
-functional, `P_len` from 0.95 to 0.50:
+Both constants are hard-coded, not exposed on the command line, so a clone that
+does not carry the working-tree state will silently run a different objective.
+They are frozen under the tag `v2-production`.
 
-```bash
-python analysis/make_init_sets.py --random --uniprot --pop 100 --len 15-30 --seed 42 --no-screen -o init_1530/
+**Which directory to use is determined by `pl0`, and the two must be matched.**
+
+At `pl0 = 30`, `init/` is the only usable version. In `init_varlen/` the median
+fragment is 55 aa, so its median `P_len` is 0.05 — a thirteen-fold handicap
+against the 0.65 a 25-residue sequence carries, before any other term is
+considered. Since the fitness is a product, and
+`--selection_mode strong` is a straight truncation to the top `pop_size`, half
+the set is gone in the first round. Two things then break. The run stops
+measuring where sequence came from and starts measuring which fragments happened
+to be short. And because the long ones go at once, the arm collapses to a few
+dozen genuinely competitive individuals — an unequal starting *sample size* that
+no later conditioning on length repairs.
+
+At `pl0 = 100` the relation inverts. A 55-residue fragment now carries
+`P_len = 0.995`, so the length term is inert across the whole starting
+distribution and the run is free to explore to about 75 residues before the
+penalty begins to bite. This is what `init_varlen/` was built for, and the
+threshold coincides with the definitional boundary of the peptide class: APD3
+admits sequences up to 100 aa and MACREL is defined over 10–100.
+
+Note that this uses `pl0` with **cap semantics rather than target semantics**,
+and so departs deliberately from the rule of §2.4.7.1. That rule derives `pl0`
+as the midpoint of a target class; here there is no target, only a boundary past
+which the activity predictor is undefined. Holding `c = 0.12` while raising
+`pl0` to 100 places the 90→10% transition at 82–118 residues, which is a wall at
+the definitional edge rather than a preference for any particular length —
+which is the intent. Re-deriving under the rule for an extended class of 12–100
+would instead give `pl0 = 56, c = 0.05`, a length term that is again actively
+selective, merely centred higher. The two are different experiments and the
+choice should be stated wherever the long arm is reported.
+
+Raising `pl0` **requires raising `hl0` with it.** The helix penalty uses a
+steeper logistic (`c = 0.5`), so `hl0 = 30` assigns a factor of 0.076 to a
+35-residue helix. A long peptide under that constraint cannot form the single
+extended amphipathic helix that characterises the class — LL-37 is 37 residues
+with a helix spanning about 30 — and the optimiser will instead build short
+disconnected elements. The matched setting is:
+
 ```
+short arm:  -pl0 30   -hl0 30  -bl0 12
+long arm:   -pl0 100  -hl0 40  -bl0 12
+```
+
+`bl0` stays at 12 in both. Natural β-sheet AMPs have strands of 5–7 residues
+(protegrin-1, tachyplesin) and are stabilised by disulfide bonds that neither
+the fitness function nor ESM3 models reliably, so that subclass is out of reach
+regardless and the threshold serves only to forbid extended sheets.
 
 ## How each was built
 
 ### `init_random.faa`
 
 ```bash
-python analysis/make_init_sets.py --random --pop 100 --len 25 --seed 42 -o init/
+python analysis/make_init_sets.py --random --pop 100 --len 25 --seed 42 --max-amp-prob 0.5 -o init/
 ```
 
 Uniform sampling over the 20 standard residues. Mean pairwise identity 5.0%,
@@ -73,7 +143,7 @@ which is what independent random draws give.
 ### `init_fragments.faa`
 
 ```bash
-python analysis/make_init_sets.py --uniprot --pop 100 --len 25 --seed 42 --no-screen -o init/
+python analysis/make_init_sets.py --uniprot --pop 100 --len 25 --seed 42 --max-amp-prob 0.5 -o init/
 ```
 
 **Conserved, defined as a UniRef50 cluster old enough to predate the split
@@ -81,21 +151,17 @@ between the animal phyla.** UniRef50 groups sequences at 50% identity, so the
 size of a cluster counts how often a protein recurs across genomes rather than
 how often it has been studied, and the cluster's *common taxon* is the last
 common ancestor of every member it holds. The sampling frame is the 12,841
-clusters that have a metazoan member, hold at least 100 UniProtKB entries, and
-whose common ancestor is Bilateria or older — Bilateria, Eumetazoa, Metazoa,
-Opisthokonta, Eukaryota or cellular organisms. A cluster whose ancestor is
+clusters (of 74,622 metazoan clusters) that hold at least 100 UniProtKB entries
+and whose common ancestor is Bilateria or older. A cluster whose ancestor is
 Mammalia or Euteleostomi is rejected however large it is, because it is
-conserved within one lineage rather than across many species. The 100 clusters
-actually used have a median size of 360 members and reach 3,016.
+conserved within one lineage rather than across many species.
 
 **Sampling is family-first.** Clusters are shuffled under the seed and walked in
 order; one Swiss-Prot entry is taken from each. Sampling entries directly does
 **not** work — it returns whatever UniProt has curated most, which is human, and
 lets one well-studied family contribute a dozen fragments. Within a cluster the
-species is drawn before the entry, for the same reason one level down. 267
-clusters were queried to fill 100, the other 167 having no reviewed metazoan
-entry that survived the filters. No two fragments come from the same family, let
-alone the same protein.
+species is drawn before the entry, for the same reason one level down. No two
+fragments come from the same family, let alone the same protein.
 
 Excluded by keyword: Antimicrobial (KW-0929), Immunity (KW-0391), Innate
 immunity (KW-0399), Adaptive immunity (KW-1064), Defensin (KW-0211), Antibiotic
@@ -117,76 +183,80 @@ earns its place: it passes every keyword, and is removed by GO:0006952, which it
 carries because its own fragments are antimicrobial in fish.
 
 One random window per protein. Headers keep the provenance:
-`frag_001_O00159_Homo_sapiens_803-827` gives accession, organism and the residue
+`frag_000_P10768_Homo_sapiens_164-188` gives accession, organism and the residue
 range cut. `init_fragments.tsv` carries the same 100 rows with the source protein
 name, phylum, UniRef50 cluster, cluster size, common taxon, source length and
-window.
+window, and is the authoritative record of what the set contains.
 
-What comes out is housekeeping machinery — V-type ATPase subunit d2, COP9
-signalosome subunit 3, dynein axonemal heavy chain 1, GMP reductase 1,
-multifunctional protein CAD, 26S proteasome subunit Rpn3. 100 species-diverse families across six phyla:
-Chordata 84, Arthropoda 12, and one each of Mollusca, Echinodermata, Cnidaria
-and Nematoda, from 24 source species. The chordate share reflects Swiss-Prot's
-curation, not the sampling frame; the *families* are bilaterian-wide by
-construction, whichever species the sequence was read from.
+What comes out is housekeeping machinery — S-formylglutathione hydrolase,
+GTP-binding nuclear protein Ran, V-type ATPase subunits, proteasome subunits.
+
+**Composition of `init/init_fragments.faa` as delivered** (from
+`init_fragments.tsv`, verified against the FASTA):
+
+| | |
+|---|---|
+| Distinct UniRef50 families | 100 |
+| Distinct source proteins | 100 |
+| Distinct source species | 29 |
+| Phyla | Chordata 84, Arthropoda 12, Nematoda 3, Platyhelminthes 1 |
+| Common taxon | Bilateria 45, cellular organisms 18, Eukaryota 11, Eumetazoa 10, Opisthokonta 8, Metazoa 8 |
+| Cluster size | median 387, maximum 6,554 |
+
+The chordate share reflects Swiss-Prot's curation, not the sampling frame; the
+*families* are bilaterian-wide by construction, whichever species the sequence
+was read from.
 
 The window is random within the protein, so a fragment is a piece of a conserved
 protein rather than necessarily a piece of a conserved *region* — some windows
 land in fast-evolving loops. Restricting the cut to annotated Pfam domains is the
 change that would tighten this, if the distinction ever matters to a result.
 
+### `init_varlen/`
+
+Same code, same seed, `--len 10-100`:
+
+```bash
+python analysis/make_init_sets.py --random --uniprot --pop 100 --len 10-100 --seed 42 --max-amp-prob 0.5 -o init_varlen/
+```
+
+Delivered: `init_random.faa` 100 sequences, 11–100 aa, mean 60, screen dropped
+1/100. `init_fragments.faa` 100 sequences, 10–99 aa, mean 55, screen dropped
+3/100; 352 clusters were queried to fill 100, the other 252 having no reviewed
+metazoan entry that survived the filters. `init_varlen/init_fragments.tsv`
+carries the per-fragment provenance.
+
 ### `init_orfs.faa`
 
 Not yet built. Once the source FASTA arrives:
 
 ```bash
-python analysis/make_init_sets.py --orfs <source.faa> --pop 100 --len 25 --seed 42 -o init/
+python analysis/make_init_sets.py --orfs <source.faa> --pop 100 --len 25     --seed 42 --max-amp-prob 0.5 -o init/
+python analysis/make_init_sets.py --orfs <source.faa> --pop 100 --len 10-100 --seed 42 --max-amp-prob 0.5 -o init_varlen/
 ```
 
-Same cutting logic, one window per ORF, and whichever `--len` the other two
-sets in that directory were cut to — 25 for `init/`, `10-100` for
-`init_varlen/`. An arm cut to a different distribution from the arms it is
-compared against is measuring length, not origin.
-
-## Outstanding: the AMP screen
-
-These sets are meant to start *without* antimicrobial activity, so anything
-MACREL already calls an AMP should be dropped. That screen needs MACREL on PATH
-and has **not** been applied to the files as committed, because it was not
-available where they were generated.
-
-`init_fragments.faa` was therefore built with `--no-screen` deliberately. Without
-MACREL, `score.py` falls back to the biophysical surrogate, and that surrogate is
-a different and much harsher standard — it dropped 6 of the first 7 candidates in
-a trial run. Screening one set on the surrogate while `init_random.faa` sits
-unscreened would confound the comparison at the point it is meant to be cleanest.
-
-Regenerate on a machine with MACREL before running:
-
-```bash
-python analysis/make_init_sets.py --random --uniprot --max-amp-prob 0.5 -o init/
-```
-
-Or screen the existing files and remove anything above the threshold. Either way
-the same screen must be applied to all three sets, or the comparison is between
-sets filtered to different standards.
+Same cutting logic, one window per ORF, and whichever `--len` the other two sets
+in that directory were cut to. An arm cut to a different distribution from the
+arms it is compared against is measuring length, not origin.
 
 ## Composition
 
 | Set | Length | Mean charge | Charge range | Hydrophobic | Pairwise identity |
 |---|---|---|---|---|---|
-| random | 25 | +0.22 | −4.0 to +6.1 | 41% | 4.9% |
-| fragments | 25 | −0.24 | −5.0 to +5.1 | 38% | 5.8% |
+| random | 25 | +0.02 | −4 to +5 | 41% | 4.9% |
+| fragments | 25 | −0.19 | −7 to +5 | 37% | 5.8% |
 
-Hydrophobic is the fraction of AVLIMFWC and charge is net charge at pH 7; both
-rows are computed the same way. The two sets are matched in length and close in
-mean charge and hydrophobic content, so neither starts with the amphipathic
-composition an AMP needs, which is the property the runs are meant to evolve.
-They differ where real sequence differs from random: the fragments carry natural
-amino-acid usage, L, A, E, K, S, V most frequent, against a flat distribution in
-the random set, and a charge range of −5.0 to +5.1 that is skewed
-negative where the random set's is not, because real protein regions are locally
-charged in a way independent draws are not.
+Hydrophobic is the fraction of AVLIMFWC; charge counts K and R as +1 and D and E
+as −1. (§2.4.8 of the thesis reports +0.05 and −0.19 from a pH-7 calculation that
+also gives histidine a partial charge; the two agree to within that difference.)
+
+The two sets are matched in length and close in mean charge and hydrophobic
+content, so neither starts with the amphipathic composition an AMP needs, which
+is the property the runs are meant to evolve. They differ where real sequence
+differs from random: the fragments carry natural amino-acid usage — L, A, E, K,
+S, V most frequent — against a flat distribution in the random set, and a charge
+range skewed negative where the random set's is symmetric, because real protein
+regions are locally charged in a way independent draws are not.
 
 Pairwise identity near 5% in both confirms no family is over-represented, and for
 the fragments the construction guarantees it anyway: 100 distinct UniRef50
