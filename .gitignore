@@ -432,3 +432,6 @@ comparison_plots_300/
 .claude/
 smprot_raw/
 smprot_raw/
+
+# Intermediate structures: 60,000 PDB per run, re-derivable from progress.log
+production/**/structures/
