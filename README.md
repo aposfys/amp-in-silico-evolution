@@ -17,7 +17,7 @@ Bioinformatics, National and Kapodistrian University of Athens), on top of
 | **`fitness-pfes-macrel`** | pLDDT × pTM × length × helix × β × **MACREL** × contacts | the full objective — **the production branch** |
 | `fitness-fold-macrel` | pLDDT × pTM × **MACREL** | activity and fold only, no structural penalties |
 | `fitness-pfes` | pLDDT × pTM × length × helix × β × contacts | the upstream objective, no activity term |
-| `alpha` | — | upstream PFES, **unmodified**; the reference the parameterisation audit is against |
+| `upstream` | — | PFES as published, **unmodified**; the reference the parameterisation audit is against (was `alpha`) |
 | `main` | — | this page |
 
 [`production/`](production/) holds the twelve-run design study the thesis reports:
@@ -173,6 +173,29 @@ series is exactly this case, deliberately — see `production/README.md`.
 **Deduplication cost grows quadratically.** `--norepeat` scans the whole
 `ancestral_memory` for every candidate, and that table gains `-ps` rows per generation,
 so runtime is not linear in `-ng`.
+
+## Hardware
+
+Upstream PFES was developed and tested on Rocky Linux 8.7 with NVIDIA V100 and A100
+GPUs. **The twelve production runs here ran on CPU** — every one logs `ready [cpu]` at
+startup — so the fork is exercised on a path upstream did not report.
+
+This does not change what is computed. Device selection at `pfes.py:930` only chooses
+where ESM3 runs; MACREL, HemoPI2 and PSIQUE are CPU tools on either platform. The one
+place the code branches on device is `use_threads = device.type != 'cpu'`, which
+overlaps the scoring thread of one batch with the folding of the next: a pipelining
+optimisation on GPU, serial on CPU, identical arithmetic either way.
+
+What it does change is throughput, and that shaped the protocol — six hundred
+generations rather than the several thousand of the original, with selection sharpened
+to compensate. Anyone reproducing on a GPU should expect the same distribution of
+outcomes but not the same numbers, since ESM3 matmuls run in reduced precision under
+TF32 on Ampere while CPU stays at full fp32. That is moot in practice: nothing here is
+bit-reproducible on any hardware, because no random number generator is seeded.
+
+A third path exists and is a fork addition: Apple MPS is checked *before* CUDA, and a
+monkeypatch at the top of `pfes.py` disables ESM3's fp32 autocast there because MPS does
+not implement it. That path is untested at scale and was not used for any reported run.
 
 ## Licence
 
