@@ -19,6 +19,7 @@
 # steeper length penalty -- survives intact as a sensitivity comparison.
 set -u
 source "$(conda info --base)/etc/profile.d/conda.sh"; conda activate pfes_amps
+source "$(dirname "$0")/preflight.sh"   # abort if macrel/hemopi2/esm3 are not really there
 
 R=/data/apostolos/pfes
 OUT=$R/results/v2
