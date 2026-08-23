@@ -12,13 +12,29 @@ Bioinformatics, National and Kapodistrian University of Athens), on top of
 
 ## Where to look
 
+Two arms, run from the same starting populations so the difference between them
+is attributable to the objective alone.
+
 | Branch | Objective | |
 |---|---|---|
 | **`fitness-pfes-macrel`** | pLDDT × pTM × length × helix × β × **MACREL** × contacts | the full objective — **the production branch** |
-| `fitness-fold-macrel` | pLDDT × pTM × **MACREL** | activity and fold only, no structural penalties |
-| `fitness-pfes` | pLDDT × pTM × length × helix × β × contacts | the upstream objective, no activity term |
+| **`fitness-esm3`** | pLDDT × pTM | **the control** — ESM3 fold confidence alone, no structural terms, no classifier |
 | `upstream` | — | PFES as published, **unmodified**; the reference the parameterisation audit is against (was `alpha`) |
 | `main` | — | this page |
+
+Both arms compute and log everything either one selects on, so their
+`progress.log` files share a schema and can be compared column by column —
+including `amp_prob` on the control, which MACREL scores but never drives.
+
+<details>
+<summary>Retired branches</summary>
+
+`fitness-fold-macrel` (pLDDT × pTM × MACREL) and `fitness-pfes` (the upstream
+objective with no activity term) were superseded by the two-arm design above.
+Neither accumulated a replicated production series: `fitness-fold-macrel` has a
+single run killed at generation 1, and `fitness-pfes` none. Their tips are
+preserved as `backup/20260823/*` tags.
+</details>
 
 [`production/`](production/) holds the twelve-run design study the thesis reports:
 three starting populations × two penalty conditions × two replicates, one compressed
