@@ -513,10 +513,22 @@ def hemopi2_score_batch(sequences, model=1):
         return fallback
 
 
-def macrel_score_batch(sequences):
+def macrel_score_batch_src(sequences):
     """
+    As macrel_score_batch, but returns 3-tuples
+    {sequence: (amp_probability, hemolytic_probability, source)} where
+    source is 'macrel' or 'proxy'.
+
+    The distinction matters because MACREL is defined for 10-100 residues
+    and the biophysical calculate_samp surrogate is substituted silently
+    outside that window. On an arm with no length term the population
+    drifts past 100 aa, so the amp_prob column changes identity mid-run
+    with only a line on stderr to say so. Recording the source per row
+    puts that in the data instead of the console, where it survives into
+    the analysis.
+
     Score sequences for AMP activity (MACREL) and hemolysis (HemoPI2).
-    Returns dict {sequence: (amp_probability, hemolytic_probability)}.
+    Returns dict {sequence: (amp_probability, hemolytic_probability, source)}.
 
     AMP probability: from MACREL (falls back to calculate_samp for sequences
     outside 10-100 AA range or on MACREL failure).
@@ -529,7 +541,8 @@ def macrel_score_batch(sequences):
         return {}
     # Hemolytic probability for the whole batch (one HemoPI2 call).
     hemo_scores = hemopi2_score_batch(sequences)
-    fallback = {seq: (calculate_samp(seq), hemo_scores[seq]) for seq in sequences}
+    fallback = {seq: (calculate_samp(seq), hemo_scores[seq], 'proxy')
+                for seq in sequences}
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             fasta_path = os.path.join(tmpdir, 'batch.faa')
@@ -607,7 +620,8 @@ def macrel_score_batch(sequences):
                 )
             return {
                 seq: (seq_map.get(macrel_key(seq), fallback[seq][0]),
-                      hemo_scores[seq])
+                      hemo_scores[seq],
+                      'macrel' if macrel_key(seq) in seq_map else 'proxy')
                 for seq in sequences
             }
     except Exception as e:
@@ -616,3 +630,14 @@ def macrel_score_batch(sequences):
             ' — using fallback\n'
         )
         return fallback
+
+
+def macrel_score_batch(sequences):
+    """
+    Backward-compatible view of macrel_score_batch_src: returns
+    {sequence: (amp_probability, hemolytic_probability)}, dropping the scorer
+    provenance. Kept because several analysis entry points unpack 2-tuples.
+    New code that cares which scorer answered should call
+    macrel_score_batch_src directly.
+    """
+    return {k: (v[0], v[1]) for k, v in macrel_score_batch_src(sequences).items()}
