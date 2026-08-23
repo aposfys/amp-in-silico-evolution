@@ -142,7 +142,8 @@ def _print_startup(args, evolver, date_now, time_now):
     print(f"  init seq:   {init_display}  (rand_len={args.random_seq_len})")
     print(f"  penalties:  len≥{args.prot_len_penalty}  helix≥{args.helix_len_penalty}  beta≥{args.beta_len_penalty}")
     _hemo = "×(1-hemo)" if args.hemo_in_score else "hemo=attribute-only (not in score)"
-    print(f"  scoring:    pLDDT×pTM×len_pen×helix_pen×beta_pen×AMP{'×(1-hemo)' if args.hemo_in_score else ''}×contacts  [MACREL AMP + PFES; {_hemo}]")
+    print(f"  scoring:    pLDDT×pTM  [ESM3 fold confidence ONLY — no structural terms, no MACREL]")
+    print(f"  attributes: len_pen, helix_pen, beta_pen, contacts, amp_prob, hemo_prob  (logged, NOT in score)")
     print(f"  output:     {args.outpath}/{args.log}")
     print(f"{'═'*_W}\n")
 
@@ -248,27 +249,26 @@ def extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_s
         amp_prob, hemo_prob = macrel_scores.get(seq, (calculate_samp(seq), calculate_hemo_proxy(seq)))
         hemo_factor = (1 - hemo_prob) if args.hemo_in_score else 1.0
 
+        # ESM3-ONLY OBJECTIVE. Selection is driven by nothing but the two
+        # numbers ESM3 emits: mean pLDDT and pTM. No geometry, no secondary
+        # structure, no activity classifier.
+        #
+        # Every other quantity is still COMPUTED AND LOGGED as an attribute,
+        # so this branch's progress.log has the same schema as
+        # fitness-pfes-macrel's and the two are directly comparable. That is
+        # the point of the arm: it answers "what does fold confidence alone
+        # select for, and are those peptides antimicrobial?", which can only
+        # be read off if amp_prob is recorded for peptides it never drove.
+        # Set PFES_SKIP_HEMO=1 to drop the per-generation HemoPI2 call if the
+        # attribute is not wanted at that price.
         if args.evolution_mode == "single_chain":
-            # iplddt and inter-chain contact term are always 1.0 for single chains — omit them.
+            # iplddt is always 1.0 for single chains — omit it.
             score = np.prod([mean_plddt,
-                             ptm,
-                             prot_len_penalty,
-                             max_beta_penalty,
-                             max_alpha_penalty,
-                             amp_prob,
-                             hemo_factor,
-                             (num_conts + seq_len) / seq_len])
+                             ptm])
         else:
             score = np.prod([mean_plddt,
                              ptm,
-                             iplddt,
-                             prot_len_penalty,
-                             max_beta_penalty,
-                             max_alpha_penalty,
-                             amp_prob,
-                             hemo_factor,
-                             (num_conts + seq_len) / seq_len,
-                             (num_inter_conts + seq_len) / (seq_len + 1)])
+                             iplddt])
         #================================SCORING================================#
         #=======================================================================#
 
