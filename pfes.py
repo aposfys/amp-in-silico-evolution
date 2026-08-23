@@ -28,7 +28,7 @@ except ImportError:
     pass
 
 from evolution import Evolver
-from score import get_nconts, cbiplddt, calculate_samp, calculate_hemo_proxy, macrel_score_batch
+from score import get_nconts, cbiplddt, calculate_samp, calculate_hemo_proxy, macrel_score_batch_src
 from psique import pypsique
 
 from esm.sdk.api import ESMProtein, GenerationConfig
@@ -224,7 +224,11 @@ def extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_s
 
         #=======================================================================#
         #================================SCORING================================#
-        num_conts, _mean_plddt_ = get_nconts(pdb_txt, 'A', 8.0, 0.5) #plddt is better only for chain A and for residues > 50
+        # Eq. 5 of Sahakyan et al.: Cbeta contacts within 6 A, |i-j| > 5,
+        # both residues above the pLDDT floor. 6.0/0.5 rather than the
+        # upstream 6.0/50 because ESM3 writes pLDDT on a 0-1 scale;
+        # get_nconts normalises either scale, so both forms are safe.
+        num_conts, _mean_plddt_ = get_nconts(pdb_txt, 'A', 6.0, 0.5)
 
         if args.evolution_mode == "single_chain": #if there are two or more chains, then calculate the number of interacting contacts
             num_inter_conts, iplddt = 1, 1
@@ -241,7 +245,13 @@ def extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_s
         # MACREL AMP probability. HemoPI2 hemolysis is ALWAYS computed and logged as an
         # attribute (the hemo_prob column). By DEFAULT it does NOT drive selection
         # (hemo_factor = 1); pass --hemo-in-score to penalise the score via (1 - hemo_prob).
-        amp_prob, hemo_prob = macrel_scores.get(seq, (calculate_samp(seq), calculate_hemo_proxy(seq)))
+        # amp_src records WHICH scorer answered: 'macrel' or 'proxy'. MACREL is
+        # defined for 10-100 residues and the biophysical surrogate is
+        # substituted silently outside it, so on an arm with no length term the
+        # amp_prob column can change identity mid-run. Logging the source keeps
+        # that in the data rather than only on stderr.
+        amp_prob, hemo_prob, amp_src = macrel_scores.get(
+            seq, (calculate_samp(seq), calculate_hemo_proxy(seq), 'proxy'))
         hemo_factor = (1 - hemo_prob) if args.hemo_in_score else 1.0
 
         if args.evolution_mode == "single_chain":
@@ -284,6 +294,7 @@ def extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_s
                                 #'ptm_full': ptm_full,
                                 #'cd' contact_density
                                 'amp_prob': round(amp_prob, 3),
+                                'amp_src': amp_src,
                                 'hemo_prob': round(hemo_prob, 3),
                                 'score': round(score, 3),
                                 'sequence': seq,
@@ -330,6 +341,7 @@ def fold_evolver(args, model, evolver, logheader, init_gen, device) -> None:
              'sel_mode',
              #'dG',
              'amp_prob',
+             'amp_src',
              'hemo_prob',
              'score',
              'sequence',
@@ -402,7 +414,7 @@ def fold_evolver(args, model, evolver, logheader, init_gen, device) -> None:
                 trd.join()
 
             # 4. Run MACREL on current batch
-            macrel_scores = macrel_score_batch(sequences)
+            macrel_scores = macrel_score_batch_src(sequences)
 
             if use_threads:
                 # 5a. GPU/MPS: overlap next fold with this scoring
@@ -504,6 +516,7 @@ def inter_fold_evolver(args, model, evolver, logheader, init_gen, device) -> Non
                'sel_mode',
                #'dG',
                'amp_prob',
+               'amp_src',
                'hemo_prob',
                'score',
                'sequence',
@@ -577,7 +590,7 @@ def inter_fold_evolver(args, model, evolver, logheader, init_gen, device) -> Non
 
             # 4. Run MACREL on chain A only
             chain_a_seqs = [s.split(':')[0] for s in sequences]
-            macrel_scores = macrel_score_batch(chain_a_seqs)
+            macrel_scores = macrel_score_batch_src(chain_a_seqs)
 
             if use_threads:
                 # 5a. GPU/MPS: overlap next fold with this scoring

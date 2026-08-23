@@ -435,3 +435,15 @@ smprot_raw/
 
 # Intermediate structures: 60,000 PDB per run, re-derivable from progress.log
 production/**/structures/
+
+# ---------------------------------------------------------------------------
+# Local run scratch. pfes-results/ is ~3.1 GB of run outputs (gzipped PDBs per
+# candidate per generation) and pfes-runs/ holds the per-run tar archives. Both
+# are working directories synced off the HPC, not repository content: one
+# `git add -A` would otherwise commit them.
+pfes-results/
+pfes-runs/
+
+# macOS Finder metadata
+.DS_Store
+**/.DS_Store

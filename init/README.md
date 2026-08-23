@@ -8,7 +8,7 @@ from sequence that already encodes something else.
 | File | Origin | Status |
 |---|---|---|
 | `init_random.faa` | completely random, uniform over the 20 residues | ready, screened |
-| `init_orfs.faa` | small ORFs from metazoan transcriptomes | **awaiting the source FASTA** |
+| `init_orfs.faa` | small ORFs from metazoan transcriptomes | ready, screened |
 | `init_fragments.faa` | fragments of conserved metazoan proteins that are not AMPs | ready, screened |
 
 Each is fed to a run as a fixed starting population:
@@ -228,12 +228,20 @@ carries the per-fragment provenance.
 
 ### `init_orfs.faa`
 
-Not yet built. Once the source FASTA arrives:
+Built and screened: 100 fragments, one window per source ORF, drawn from the
+2,999 small ORFs in `source_sorfs.faa` (provenance in `source_sorfs.tsv`, built
+by `analysis/build_sorf_source.py`). Per-fragment provenance is in
+`init_orfs.tsv`.
 
 ```bash
-python analysis/make_init_sets.py --orfs <source.faa> --pop 100 --len 25     --seed 42 --max-amp-prob 0.5 -o init/
-python analysis/make_init_sets.py --orfs <source.faa> --pop 100 --len 10-100 --seed 42 --max-amp-prob 0.5 -o init_varlen/
+python analysis/make_init_sets.py --orfs init/source_sorfs.faa --pop 100 --len 25     --seed 42 --max-amp-prob 0.5 -o init/
+python analysis/make_init_sets.py --orfs init/source_sorfs.faa --pop 100 --len 10-100 --seed 42 --max-amp-prob 0.5 -o init_varlen/
 ```
+
+The screen drops any window MACREL already calls antimicrobial and then tops up
+from ORFs not already used, so the set is 100 fragments from 100 distinct source
+ORFs. Without that top-up a screened ORF set comes out smaller than the random
+and fragments arms and the three origins stop being size-matched.
 
 Same cutting logic, one window per ORF, and whichever `--len` the other two sets
 in that directory were cut to. An arm cut to a different distribution from the
