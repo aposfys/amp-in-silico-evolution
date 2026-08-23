@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -u
 source "$(conda info --base)/etc/profile.d/conda.sh"; conda activate pfes_amps
+source "$(dirname "$0")/preflight.sh"   # abort if macrel/hemopi2/esm3 are not really there
 R=/data/apostolos/pfes; F=/data/apostolos/pfes-foldmacrel; OUT=$R/results/final
 mkdir -p "$OUT"
 
