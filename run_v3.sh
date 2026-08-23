@@ -29,12 +29,25 @@
 # Check the node is quiet before starting:  uptime
 
 set -u
+
+# Thread oversubscription. torch intra-op, torch inter-op, MKL and OpenMP nest,
+# so --threads 48 produced 191 threads on 48 cores. Under any contention at all
+# the OpenMP spin barrier then convoys and throughput collapses non-linearly:
+# 26 s per generation on a free machine against 415 s at a run queue of 52.
+# Sleep rather than spin, pin every layer to one count, leave 8 cores of slack.
+export KMP_BLOCKTIME=0
+export OMP_WAIT_POLICY=PASSIVE
+export OMP_NUM_THREADS=40
+export MKL_NUM_THREADS=40
+export TOKENIZERS_PARALLELISM=false
+source "$(dirname "$0")/preflight.sh"   # abort if macrel/hemopi2/esm3 are not really there
+
 R=/data/apostolos/pfes
 OUT=$R/results/v3
 LOG=$R/results/v3.master.log
 NGEN=600
 STRONG=$(( NGEN * 80 / 100 ))
-THREADS=$(nproc)
+THREADS=40
 
 SHORT="-pl0 30  -hl0 30 -bl0 12"
 LONG="-pl0 100 -hl0 40 -bl0 12"

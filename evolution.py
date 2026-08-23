@@ -49,12 +49,22 @@ class Evolver():
                   'Y' : 0.655738 #2
                   }
 
-    #https://www.uniprot.org/uniprotkb/statistics#amino-acid-composition
-    uniprotrates = {'A' : 0.0826, 'C' : 0.0139, 'D' : 0.0546, 'E' : 0.0672, 
-                    'F' : 0.0387, 'G' : 0.0707, 'H' : 0.0228, 'I' : 0.0591, 
-                    'K' : 0.0580, 'L' : 0.0965, 'M' : 0.0241, 'N' : 0.0406, 
-                    'P' : 0.0475, 'Q' : 0.0393, 'R' : 0.0553, 'S' : 0.0665, 
-                    'T' : 0.0536, 'V' : 0.0686, 'W' : 0.0110, 'Y' : 0.0292}
+    # https://www.uniprot.org/uniprotkb/statistics#amino-acid-composition
+    # Scaled x20 so the MEAN rate is 1, matching codonrates and the "Uniprot
+    # rate" column of Table S3 in the PFES SI Appendix (A 1.652, C 0.278, ...).
+    #
+    # The scaling is not cosmetic. non_point_mutations are merged in with
+    # ABSOLUTE weights (sum 3.85) and only then normalised, so the raw
+    # frequencies (which sum to 1.0) made indels and duplications 79% of all
+    # mutations instead of 16%:
+    #     sum(aa)=20.0 -> P(point)=83.9%   P(indel/dup)=16.1%   <- correct
+    #     sum(aa)= 1.0 -> P(point)=20.6%   P(indel/dup)=79.4%   <- the bug
+    # A silently different evolutionary regime. Upstream PFES has the same bug.
+    uniprotrates = {'A' : 1.652, 'C' : 0.278, 'D' : 1.092, 'E' : 1.344,
+                    'F' : 0.774, 'G' : 1.414, 'H' : 0.456, 'I' : 1.182,
+                    'K' : 1.160, 'L' : 1.930, 'M' : 0.482, 'N' : 0.812,
+                    'P' : 0.950, 'Q' : 0.786, 'R' : 1.106, 'S' : 1.330,
+                    'T' : 1.072, 'V' : 1.372, 'W' : 0.220, 'Y' : 0.584}
 
 
     codonrates_pmo = {'A' : 1.311475, #4

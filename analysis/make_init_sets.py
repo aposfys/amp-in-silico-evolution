@@ -177,7 +177,24 @@ def cut(seq, length, rng):
 
 # --------------------------------------------------------------------------- #
 def screen_amp(records, max_prob):
-    """Drop anything MACREL already calls antimicrobial."""
+    """
+    Drop anything MACREL already calls antimicrobial.
+
+    Two properties this screen must have, and previously did not:
+
+    Fail CLOSED. An unscored sequence used to default to 0.0, which is <=
+    max_prob, so anything MACREL did not return silently PASSED the screen --
+    the exact opposite of what a screen is for. The starting population must
+    contain no known AMPs, so a sequence whose AMP probability is unknown is
+    dropped, not kept, and the count is reported.
+
+    Say which scorer answered. macrel_score_batch substitutes the biophysical
+    calculate_samp surrogate whenever MACREL is unavailable or the sequence
+    falls outside its 10-100 residue window. A screen run entirely on the
+    surrogate is not a MACREL screen, and printing "dropped N with MACREL >
+    0.5" in that case is simply false. The v2 production series ran ~60 h that
+    way. Now the source is counted and a surrogate-only screen warns loudly.
+    """
     try:
         import score
     except Exception as e:
@@ -185,16 +202,35 @@ def screen_amp(records, max_prob):
         return records, None
     seqs = [s for _, s in records]
     try:
-        scored = score.macrel_score_batch(seqs)
+        scored = score.macrel_score_batch_src(seqs)
     except Exception as e:
         sys.stderr.write(f"  AMP screen skipped, MACREL failed ({e})\n")
         return records, None
     if not scored:
         sys.stderr.write("  AMP screen skipped, MACREL returned nothing\n")
         return records, None
-    kept = [(n, s) for n, s in records if scored.get(s, (0.0,))[0] <= max_prob]
+
+    kept, unscored = [], 0
+    for n, seq in records:
+        hit = scored.get(seq)
+        if hit is None:
+            unscored += 1          # fail closed: unknown is not "not an AMP"
+            continue
+        if hit[0] <= max_prob:
+            kept.append((n, seq))
     dropped = len(records) - len(kept)
-    print(f"  AMP screen: dropped {dropped}/{len(records)} with MACREL > {max_prob}")
+
+    by_macrel = sum(1 for v in scored.values() if v[2] == 'macrel')
+    src = (f"{by_macrel}/{len(scored)} by MACREL"
+           if by_macrel else "biophysical surrogate ONLY")
+    print(f"  AMP screen: dropped {dropped}/{len(records)} with prob > {max_prob}"
+          f"  [{src}]")
+    if unscored:
+        sys.stderr.write(f"  AMP screen: {unscored} sequence(s) had no score and "
+                         f"were dropped rather than assumed non-AMP\n")
+    if not by_macrel:
+        sys.stderr.write("  *** AMP screen ran on the biophysical surrogate, not "
+                         "MACREL. The init set is NOT MACREL-screened. ***\n")
     return kept, dropped
 
 
@@ -347,25 +383,43 @@ def sample_conserved(n, length, rng, min_size, cache, tag="frag",
     return out, meta
 
 
-def build_fragments(source, n, length, rng, tag):
-    """One random window per protein, so fragments are maximally independent."""
-    pool = [(nm, s) for nm, s in source if len(clean(s)) >= length[0]]
+def build_fragments(source, n, length, rng, tag, exclude=None, offset=0):
+    """
+    One random window per protein, so fragments are maximally independent.
+
+    Returns (records, meta). `meta` mirrors what sample_conserved produces for
+    the fragments arm, so the ORF arm can write the same kind of provenance
+    TSV: without it there is no record of which source ORF each fragment came
+    from, and a set that cannot be traced cannot be audited.
+
+    `exclude` is a set of source names already used, and `offset` continues the
+    fragment numbering, so a screened set can be topped up without reusing a
+    source ORF or colliding with existing fragment names.
+    """
+    exclude = exclude or set()
+    pool = [(nm, s) for nm, s in source
+            if len(clean(s)) >= length[0] and nm not in exclude]
     if len(pool) < n:
         sys.stderr.write(
             f"  only {len(pool)} sequences are at least {length[0]} aa; "
             f"windows will be reused across the shortfall\n")
     rng.shuffle(pool)
-    out, i = [], 0
+    out, meta, i = [], [], 0
     while len(out) < n and pool:
         nm, s = pool[i % len(pool)]
         frag = cut(s, length, rng)
         if frag:
             short = nm.split("|")[1] if "|" in nm else nm
-            out.append((f"{tag}_{len(out)}_{short}", frag))
+            name = f"{tag}_{offset + len(out)}_{short}"
+            out.append((name, frag))
+            meta.append({"fragment": name,
+                         "source": nm,
+                         "source_len": len(clean(s)),
+                         "fragment_len": len(frag)})
         i += 1
         if i > 20 * n:
             break
-    return out
+    return out, meta
 
 
 def write_meta(path, meta, kept):
@@ -465,10 +519,32 @@ def main():
         print("\n[2] small ORFs from metazoan transcriptomes")
         source = parse_fasta(open(args.orfs).read())
         print(f"  read {len(source)} ORFs from {args.orfs}")
-        recs = build_fragments(source, args.pop, args.length, rng, "orf")
+        recs, meta = build_fragments(source, args.pop, args.length, rng, "orf")
         if not args.no_screen:
-            recs, _ = screen_amp(recs, args.max_amp_prob)
+            kept, dropped = screen_amp(recs, args.max_amp_prob)
+            # Top up from ORFs not already used, so a screened set is still
+            # `pop` fragments from `pop` distinct source ORFs. Without this the
+            # ORF arm silently ends up smaller than the random and fragments
+            # arms whenever the screen drops anything, and the three origins
+            # stop being comparable.
+            while dropped and len(kept) < args.pop:
+                used = {m["source"] for m in meta}
+                extra, extra_meta = build_fragments(
+                    source, args.pop - len(kept), args.length, rng, "orf",
+                    exclude=used, offset=len(kept))
+                if not extra:
+                    break
+                extra, dropped = screen_amp(extra, args.max_amp_prob)
+                kept += extra
+                meta += extra_meta
+            recs = kept
+        if len(recs) < args.pop:
+            sys.stderr.write(
+                f"  WARNING: ORF set is {len(recs)}/{args.pop}; it is NOT "
+                f"size-matched to the random and fragments arms\n")
         write_fasta(os.path.join(args.outdir, "init_orfs.faa"), recs[:args.pop])
+        write_meta(os.path.join(args.outdir, "init_orfs.tsv"),
+                   meta, recs[:args.pop])
 
     print()
 
