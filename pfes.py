@@ -233,7 +233,10 @@ def extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_s
         if args.evolution_mode == "single_chain": #if there are two or more chains, then calculate the number of interacting contacts
             num_inter_conts, iplddt = 1, 1
         else:
-            num_inter_conts, iplddt = cbiplddt(pdb_txt, 'A', 'B', 8.0, 0.4)
+            # Eq. 5 / Methods: interface Cbeta contacts within 6 A, pLDDT floor
+            # 0.5 (the paper's >50 on ESM3's 0-1 scale) -- matched to the
+            # intra-chain call above rather than the old 8.0 / 0.4.
+            num_inter_conts, iplddt = cbiplddt(pdb_txt, 'A', 'B', 6.0, 0.5)
 
         ss, max_helix, max_beta = pypsique(pdb_txt, 'A')
         #Rg, aspher = get_aspher(pdb_txt)
