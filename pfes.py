@@ -224,7 +224,11 @@ def extract_results(gen_i, headers, sequences, pdbs, ptms, mean_plddts, macrel_s
 
         #=======================================================================#
         #================================SCORING================================#
-        num_conts, _mean_plddt_ = get_nconts(pdb_txt, 'A', 8.0, 0.5) #plddt is better only for chain A and for residues > 50
+        # Eq. 5 of Sahakyan et al.: Cbeta contacts within 6 A, |i-j| > 5,
+        # both residues above the pLDDT floor. 6.0/0.5 rather than the
+        # upstream 6.0/50 because ESM3 writes pLDDT on a 0-1 scale;
+        # get_nconts normalises either scale, so both forms are safe.
+        num_conts, _mean_plddt_ = get_nconts(pdb_txt, 'A', 6.0, 0.5)
 
         if args.evolution_mode == "single_chain": #if there are two or more chains, then calculate the number of interacting contacts
             num_inter_conts, iplddt = 1, 1
