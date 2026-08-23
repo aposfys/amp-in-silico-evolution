@@ -6,6 +6,7 @@ set -u
 # Χωρίς αυτό το `python` είναι του base και λείπουν esm, macrel, hemopi2.
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate pfes_amps
+source "$(dirname "$0")/preflight.sh"   # abort if macrel/hemopi2/esm3 are not really there
 python -c "import esm, score" 2>/dev/null || { echo "!!! λάθος environment"; exit 1; }
 echo "environment: $CONDA_DEFAULT_ENV"
 
