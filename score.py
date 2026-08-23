@@ -236,56 +236,78 @@ def get_inter_nconts(pdb_txt, chainA='A', chainB='B', distance_cutoff=6.0, plddt
 
 def cbiplddt(pdb_txt, chainA='A', chainB='B', distance_cutoff=6.0, plddt_cutoff=0):
     """
-    Calculates number of contaict between two protein chains and iPLDDT
+    Interface contacts and interface pLDDT between two chains.
+
+    Per Sahakyan et al. 2025 (Methods): ipLDDT is "pLDDT on the interface of
+    interacting proteins, that includes residues between chains where C-beta
+    atoms are closer than 6 A", and iCD is "the number of contacts between
+    chains calculated in the same way".
+
+    Rewritten during the Eq. 5 audit. The previous version:
+
+      * was named and documented for C-beta but filtered `== "CA"`, the same
+        misnomer get_nconts carried;
+      * returned `round(iPLDDT * 0.01, 2)`, which assumes ESMFold's 0-100
+        B-factor scale. ESM3 writes 0-1, so this returned ~0.0098 instead of
+        ~0.98 -- and unlike the copy in get_nconts, this value is NOT
+        discarded: it multiplies straight into the dimer score, scaling every
+        inter_chain fitness down by about 100x;
+      * averaged chain A's interface pLDDT only, ignoring chain B, though the
+        paper defines the interface as residues *between* chains.
+
+    Cbeta is reconstructed from the backbone where absent (ESM3 emits
+    backbone-only structures) and the real atom used where present, matching
+    get_nconts. Returns (n_interface_contacts, mean_interface_pLDDT) with
+    pLDDT on a 0-1 scale.
     """
-
-    # Get all C-beta atoms with specific pLDDT cutoff
-    cbeta_atom = []
+    ca, cb, n_at, c_at, bf, ch = {}, {}, {}, {}, {}, {}
     for line in pdb_txt.splitlines():
-        if (line.startswith('ATOM  ') or line.startswith('HETATM')) and line[12:16].strip() == "CA":
-            cbeta_atom.append(line)
-            
-    cbeta_array = [['X' for j in range(8)] for i in range(len(cbeta_atom))]
-    for row in range(len(cbeta_atom)):
-        cbeta_array[row][0] = row					#Index
-        cbeta_array[row][1] = (cbeta_atom[row][22:26]).strip()	#Residue Number
-        cbeta_array[row][2] = (cbeta_atom[row][30:38]).strip()	#xyz
-        cbeta_array[row][3] = (cbeta_atom[row][38:46]).strip()	#xyz
-        cbeta_array[row][4] = (cbeta_atom[row][46:54]).strip()	#xyz
-        cbeta_array[row][5] = (cbeta_atom[row][60:66]).strip()	#pLDDT 
-        cbeta_array[row][6] = (cbeta_atom[row][21:22]).strip()	#ChainID
-        cbeta_array[row][7] = (cbeta_atom[row][17:20]).strip()	#Residue Name
+        if not (line.startswith('ATOM  ') or line.startswith('HETATM')):
+            continue
+        try:
+            key = (line[21], int(line[22:26].strip()))
+            xyz = np.array([float(line[30:38]), float(line[38:46]), float(line[46:54])])
+            b = float(line[60:66].strip())
+        except ValueError:
+            continue
+        name = line[12:16].strip()
+        if name == 'CA':
+            ca[key] = xyz; bf[key] = b; ch[key] = line[21]
+        elif name == 'CB':
+            cb[key] = xyz; bf.setdefault(key, b)
+        elif name == 'N':
+            n_at[key] = xyz
+        elif name == 'C':
+            c_at[key] = xyz
 
-    cb_data_A, cb_data_B, = [], []
-    for row in range(len(cbeta_array)):
-        if cbeta_array[row][6] == chainA and float(cbeta_array[row][5]) > plddt_cutoff:
-            cb_data_A.append(cbeta_array[row][0:6])
-        if cbeta_array[row][6] == chainB and float(cbeta_array[row][5]) > plddt_cutoff:
-            cb_data_B.append(cbeta_array[row][0:6])
-            #cb_data_A = np.array(cb_data_A, dtype='float32')
-            #cb_data_B = np.array(cb_data_B, dtype='float32')
-    if len(cb_data_A) == 0 or len(cb_data_B) == 0: 
-        return(1, 0.01)
-    else:    
-        #Acoords = cb_data_A[:,2:5]        
-        #Bcoords = cb_data_B[:,2:5]
-        Acoords = np.array([item[2:5] for item in cb_data_A], dtype="float32")
-        Bcoords = np.array([item[2:5] for item in cb_data_B], dtype="float32")
-        distances_matrix = np.linalg.norm(Acoords[:, None] - Bcoords, axis=2)
-        #contact_map = distances_matrix.copy()
-        #contact_map[contact_map <= distance_cutoff] = 1
-        #contact_map[contact_map > distance_cutoff] = 0
-        matrix_mask = distances_matrix <= distance_cutoff
-        n_contacts = matrix_mask.sum()
-        if n_contacts == 0:
-            return(1,0.01)
-        else:
-            inteface_ndx = np.where(matrix_mask)
-            AiPLDDT = np.array([cb_data_A[i][5] for i in np.unique(inteface_ndx[0])],dtype=float)
-            BiPLDDT = np.array([cb_data_B[i][5] for i in np.unique(inteface_ndx[1])],dtype=float)
-            #iPLDDT = np.concatenate([AiPLDDT, BiPLDDT]).mean()
-            iPLDDT = AiPLDDT.mean()
-            return(n_contacts, round(iPLDDT * 0.01, 2))
+    if not bf:
+        return (1, 0.01)
+    raw = np.array(list(bf.values()), dtype=float)
+    scale = 100.0 if raw.max() > 1.0 else 1.0
+    cut = plddt_cutoff / 100.0 if plddt_cutoff > 1.0 else float(plddt_cutoff)
+
+    def side(chain):
+        keys = [k for k in ca if k[0] == chain and bf.get(k, 0.0) / scale > cut]
+        keys.sort(key=lambda k: k[1])
+        return keys
+
+    A, B = side(chainA), side(chainB)
+    if not A or not B:
+        return (1, 0.01)
+
+    Ac = np.array([_cbeta(k, ca, cb, n_at, c_at) for k in A])
+    Bc = np.array([_cbeta(k, ca, cb, n_at, c_at) for k in B])
+    d = np.linalg.norm(Ac[:, None] - Bc, axis=2)
+    mask = d <= distance_cutoff
+    n_contacts = int(mask.sum())
+    if n_contacts == 0:
+        return (1, 0.01)
+
+    ai, bi = np.where(mask)
+    # Interface pLDDT over residues on BOTH sides of the interface.
+    vals = ([bf[A[i]] / scale for i in np.unique(ai)] +
+            [bf[B[j]] / scale for j in np.unique(bi)])
+    return (n_contacts, round(float(np.mean(vals)), 3))
 
 
 def iplddt_all_atom(pdb_txt, chainA='A', chainB='B', distance_cutoff=6.0,):
