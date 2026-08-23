@@ -82,54 +82,108 @@ def get_aspher(pdb_txt):
  
 
 
-def get_nconts(pdb_txt, chain="A", distance_cutoff=6.0, plddt_cutoff=0): 
+def _cbeta(r, res_ca, res_cb, res_n, res_c):
     """
-    Calculates number of contaict in a protein.
+    CB position for residue r: the real atom when present, otherwise the
+    standard virtual CB built from N, CA and C (Yang et al. 2020, PNAS 117,
+    1496-1503), falling back to CA if the backbone is incomplete.
+    """
+    if r in res_cb:
+        return res_cb[r]
+    ca = res_ca[r]
+    if r in res_n and r in res_c:
+        b = ca - res_n[r]
+        c = res_c[r] - ca
+        a = np.cross(b, c)
+        return -0.58273431 * a + 0.56802827 * b - 0.54067466 * c + ca
+    return ca
 
+
+def get_nconts(pdb_txt, chain="A", distance_cutoff=6.0, plddt_cutoff=0):
     """
-    
-    # Get all C-alpha atoms with specific pLDDT cutoff
-    ca_data, plddt = [],[]
+    Number of tertiary contacts, per Eq. 5 of Sahakyan et al. 2025 (PNAS 122,
+    e2509015122):
+
+        c(i,j) = 1 if  d(Cbeta_i, Cbeta_j) < 6 A
+                   and |i - j| > 5 residues
+                   and pLDDT of both residues > 50 (0.5 on a 0-1 scale)
+
+    The |i - j| > 5 rule is what makes this a measure of TERTIARY compactness:
+    it excludes the i -> i+4 alpha-helical register, so a long helix does not
+    score as a compact fold. Upstream PFES loops `range(i + 4, n_atoms)`, which
+    admits |i - j| = 4 and 5 and therefore counts exactly those helical
+    contacts; at its 6 A cutoff the geometry mostly masks the error (Ca(i)-
+    Ca(i+4) is ~6.2 A in an ideal helix), but at a wider cutoff it dominates
+    the count. Measured on this project's own output at 8 A, 95-98% of counted
+    contacts were |i - j| = 4. Hence: Cbeta, 6 A, and range(i + 6, ...).
+
+    ESM3 emits BACKBONE-ONLY structures (N, CA, C, O -- no CB at all), so a
+    literal "read the CB atom" implementation would silently degrade to CA for
+    every residue. Where CB is absent it is therefore reconstructed from the
+    backbone with the standard virtual-CB formula (Yang et al. 2020, trRosetta),
+    which is exact for ideal tetrahedral geometry. A real CB is used when the
+    model provides one (e.g. ESMFold full-atom output). Glycine gets the same
+    virtual CB, which is the usual convention for contact definitions.
+
+    pLDDT is read scale-agnostically. ESMFold writes 0-100 into the B-factor
+    column, ESM3 writes 0-1; `plddt_cutoff` may be given on either scale and is
+    converted to match. Returns (n_contacts, mean_plddt) with mean_plddt on a
+    0-1 scale, averaged PER RESIDUE (not per atom, which would weight
+    tryptophan 14x against glycine 4x).
+    """
+
+    # One entry per residue: prefer CB, fall back to CA (glycine, or a model
+    # that omits side chains).
+    res_ca, res_cb, res_plddt = {}, {}, {}
+    res_n, res_c = {}, {}
     for line in pdb_txt.splitlines():
-        if line.startswith('ATOM  ') or line.startswith('HETATM'):
-            chain_id = line[21]
-            atom_name = line[12:16].strip()
-            
-            if chain_id == chain:
-                try:
-                    b_factor = float(line[60:66].strip())
-                except:
-                    b_factor = 0.0
-                plddt.append(b_factor)
-                
-                if atom_name == 'CA' and b_factor > plddt_cutoff:
-                    try:
-                        res_seq = int(line[22:26].strip())
-                        x = float(line[30:38].strip())
-                        y = float(line[38:46].strip())
-                        z = float(line[46:54].strip())
-                        ca_data.append([res_seq, np.array([x, y, z]), b_factor])
-                    except ValueError:
-                        pass
-    
-    if len(ca_data) == 0:
-        mean_plddt = np.mean(np.array(plddt)) if len(plddt) > 0 else 0.0
-        return(1, round(mean_plddt * 0.01, 2))
-    else:
-        coords = np.array([item[1] for item in ca_data])  # Extract coordinates
-        mean_plddt = np.mean(np.array(plddt))
-        n_atoms = len(coords)
-        #pairs_data = np.zeros((0, 5))
+        if not (line.startswith('ATOM  ') or line.startswith('HETATM')):
+            continue
+        if line[21] != chain:
+            continue
+        try:
+            res_seq = int(line[22:26].strip())
+            b_factor = float(line[60:66].strip())
+            xyz = np.array([float(line[30:38]), float(line[38:46]), float(line[46:54])])
+        except ValueError:
+            continue
+        atom_name = line[12:16].strip()
+        if atom_name == 'CA':
+            res_ca[res_seq] = xyz
+            res_plddt[res_seq] = b_factor
+        elif atom_name == 'CB':
+            res_cb[res_seq] = xyz
+            res_plddt.setdefault(res_seq, b_factor)
+        elif atom_name == 'N':
+            res_n[res_seq] = xyz
+        elif atom_name == 'C':
+            res_c[res_seq] = xyz
 
-        distances_matrix = np.linalg.norm(coords[:, None] - coords, axis=2)
-        row = 0
-        for i in range(n_atoms):
-            for j in range(i + 4, n_atoms): # do not calc dist between atoms i, ... i+4
-                if distances_matrix[i, j] < distance_cutoff:
-                    #pairs_data = np.append(pairs_data, [[row, ca_data[i][0], ca_data[j][0], np.mean([ca_data[i][2], ca_data[j][2]]), distances_matrix[i, j]]], axis=0)
-                    row += 1
-        
-        return(row+1, round(mean_plddt * 0.01, 2))
+    if not res_plddt:
+        return (0, 0.0)
+
+    # Detect the pLDDT scale from the data and normalise both it and the cutoff
+    # to 0-1, so a caller passing 50 or 0.5 gets the same behaviour.
+    raw = np.array(list(res_plddt.values()), dtype=float)
+    scale = 100.0 if raw.max() > 1.0 else 1.0
+    plddt = {k: v / scale for k, v in res_plddt.items()}
+    cutoff = plddt_cutoff / 100.0 if plddt_cutoff > 1.0 else float(plddt_cutoff)
+    mean_plddt = float(np.mean(list(plddt.values())))
+
+    keep = sorted(r for r in res_ca if plddt.get(r, 0.0) > cutoff)
+    if len(keep) < 2:
+        return (0, round(mean_plddt, 3))
+
+    coords = np.array([_cbeta(r, res_ca, res_cb, res_n, res_c) for r in keep])
+    resnum = np.array(keep)
+    d = np.linalg.norm(coords[:, None] - coords, axis=2)
+    sep = np.abs(resnum[:, None] - resnum)          # true residue separation,
+                                                    # not index separation: a
+                                                    # pLDDT-filtered gap must
+                                                    # not shrink |i - j|.
+    n_conts = int(np.count_nonzero(np.triu((d < distance_cutoff) & (sep > 5), k=1)))
+    return (n_conts, round(mean_plddt, 3))
+
 
 #TODO check how fast this is?
 def get_nconts_allatom(pdb_txt, chain="A", distance_cutoff=4.5, plddt_cutoff=0): 
@@ -247,7 +301,7 @@ if __name__ == '__main__':
         with open(input_pdb_path, 'r') as file:
             pdb_txt = file.read()
 
-        print("inner contacts, plddt:" + str(get_nconts(pdb_txt, "A", 8.0, 0)))
+        print("inner contacts, plddt:" + str(get_nconts(pdb_txt, "A", 6.0, 0.5)))
         print("inter contacts, iplddt:" + str(cbiplddt(pdb_txt, "A", "B", 8.0, 0)))
 
 
