@@ -1,218 +1,153 @@
 # PFES-AMPs
 
-In silico evolution of antimicrobial peptides. **ESM3** folds each candidate, **MACREL**
-scores it for antimicrobial activity, **HemoPI2** predicts hemolysis, and the **PFES**
-structural penalties constrain length and secondary structure. A population of one
-hundred peptides is mutated and selected for six hundred generations.
+In silico evolution of antimicrobial peptides. **ESM3** folds each candidate,
+**MACREL** scores it for antimicrobial activity, and the **PFES** structural
+terms constrain length and secondary structure. **HemoPI2** records hemolysis
+and **AMPlify** re-scores survivors, both as attributes that never touch
+selection. A population of one hundred peptides is mutated and selected for six
+hundred generations.
 
-Built for the MSc thesis *Investigating novel antimicrobial peptides using machine
-learning, structure prediction and in silico evolution* (Apostolos Fysekidis,
-Bioinformatics, National and Kapodistrian University of Athens), on top of
-[PFES](https://github.com/sahakyanhk/pfes) by Sahakyan et al.
+Built for the MSc thesis *Investigating novel antimicrobial peptides using
+machine learning, structure prediction and in silico evolution* (Apostolos
+Fysekidis, Bioinformatics, National and Kapodistrian University of Athens), on
+top of [PFES](https://github.com/sahakyanhk/pfes) by Sahakyan et al.
+
+## The objective
+
+`main` **is** the production arm. Its fitness is:
+
+```
+score = pLDDT × pTM × length_penalty × helix_penalty × beta_penalty
+        × AMP_probability × contact_density
+```
+
+| Term | Source | Range | In the score? |
+|---|---|---|---|
+| pLDDT | ESM3 | 0–1 | **yes** |
+| pTM | ESM3 | 0–1 | **yes** |
+| length_penalty | PFES Eq. 6 | 0–1 | **yes** — →0 above `-pl0` (default 30) |
+| helix_penalty | PFES Eq. 7 / PSIQUE | 0–1 | **yes** |
+| beta_penalty | PFES Eq. 8 / PSIQUE | 0–1 | **yes** |
+| AMP_probability | MACREL | 0–1 | **yes** — the only classifier driving selection |
+| contact_density | PFES Eq. 5 | ≥ 1 | **yes** |
+| hemo_prob | HemoPI2 | 0–1 | **no** — logged; `--hemo-in-score` to enable |
+| AMPlify probability | AMPlify | 0–1 | **no** — post-hoc only, never in the loop |
 
 ## Where to look
 
-Two arms, run from the same starting populations so the difference between them
+Two arms, run from identical starting populations so the difference between them
 is attributable to the objective alone.
 
 | Branch | Objective | |
 |---|---|---|
-| **`fitness-pfes-macrel`** | pLDDT × pTM × length × helix × β × **MACREL** × contacts | the full objective — **the production branch** |
-| **`fitness-esm3`** | pLDDT × pTM | **the control** — ESM3 fold confidence alone, no structural terms, no classifier |
-| `upstream` | — | PFES as published, **unmodified**; the reference the parameterisation audit is against (was `alpha`) |
-| `main` | — | this page |
+| **`main`** | pLDDT × pTM × length × helix × β × **MACREL** × contacts | the full objective — **the production arm** |
+| **`fitness-esm3`** | pLDDT × pTM | **the control** — fold confidence alone, no structural terms, no classifier |
+| `pfes-original` | — | PFES exactly as published, **unmodified**; the reference this parameterisation is audited against (was `upstream`, originally `alpha`) |
 
-Both arms compute and log everything either one selects on, so their
-`progress.log` files share a schema and can be compared column by column —
-including `amp_prob` on the control, which MACREL scores but never drives.
+Both arms compute and log every quantity either one selects on, so their
+`progress.log` files share a schema and compare column by column — including
+`amp_prob` on the control, which MACREL scores but never drives.
 
-<details>
-<summary>Retired branches</summary>
+[`production/`](production/) holds the design study the thesis reports: the
+starting populations, the launch scripts, and one compressed archive per run.
 
-`fitness-fold-macrel` (pLDDT × pTM × MACREL) and `fitness-pfes` (the upstream
-objective with no activity term) were superseded by the two-arm design above.
-Neither accumulated a replicated production series: `fitness-fold-macrel` has a
-single run killed at generation 1, and `fitness-pfes` none. Their tips are
-preserved as `backup/20260823/*` tags.
-</details>
+## Contact density measures compactness, not helicity
 
-[`production/`](production/) holds the twelve-run design study the thesis reports:
-three starting populations × two penalty conditions × two replicates, one compressed
-archive per run, plus the starting populations, the launch scripts and the winners.
-Its [README](production/README.md) describes the design and the result.
+Contacts follow Eq. 5 of Sahakyan et al. exactly: **Cβ atoms, within 6 Å, more
+than 5 residues apart in sequence**, both above the pLDDT floor.
 
-## The objective
+The `|i − j| > 5` rule is the whole point — it excludes the i→i+4 α-helical
+register, so a long helix cannot score as a compact fold. Upstream PFES loops
+`range(i + 4, …)`, admitting |i − j| = 4 and 5 and therefore counting exactly
+those helical contacts; its 6 Å cutoff mostly hides this, but a wider cutoff
+un-hides it. Measured on this project's own output at 8 Å, **95–98 % of counted
+contacts were |i − j| = 4** — the term was counting helical turns. Corrected in
+`0d06bb8`.
 
-```
-score = pLDDT × pTM × length_penalty × helix_penalty × beta_penalty × AMP_probability × contact_density
-```
+A single α-helix has no tertiary contacts, so the corrected term sits near
+**1.0** for 25–30 aa peptides and rises only for genuinely globular ones
+(measured: 1.01 for a 26-mer helix, 1.08 for a 38-mer). That is the right
+answer, not a regression.
 
-| Term | Source | Range | Note |
-|---|---|---|---|
-| pLDDT | ESM3 | 0–1 | per-residue fold confidence |
-| pTM | ESM3 | 0–1 | overall-fold confidence |
-| AMP_probability | MACREL | 0–1 | probability the peptide is antimicrobial |
-| length_penalty | PFES | 0–1 | logistic, → 0 above the `-pl0` target |
-| helix_penalty | PFES (PSIQUE) | 0–1 | → 0 for α-helices longer than `-hl0` |
-| beta_penalty | PFES (PSIQUE) | 0–1 | → 0 for β-strands longer than `-bl0` |
-| contact_density | PFES | ≥ 1 | rewards compact folds |
-| (1 − hemolysis) | HemoPI2 | 0–1 | **not in the score** unless `--hemo-in-score` |
+> **Open:** the correction lowers scores by roughly 0.6×, and Boltzmann
+> selection depends on `β(sᵢ − s_max)`, so pressure scales with score spread. β
+> is held at **20** per thesis §2.4.8.3, but that derivation predates the
+> correction and is worth re-checking against the new distribution.
 
-> **Hemolysis is an attribute by default.** HemoPI2 runs every generation and writes
-> `hemo_prob` for every peptide, but it does not affect selection. Screen candidates on
-> it afterwards, or add `--hemo-in-score` to fold `× (1 − hemolysis)` into the fitness.
+ESM3 emits **backbone-only** structures (N, CA, C, O), so Cβ is reconstructed
+with the standard virtual-Cβ formula (Yang et al. 2020) — verified at CA–CB
+1.529 Å, sd 0.0006.
+
+## `amp_src`: which scorer answered
+
+MACREL is defined for **10–100 residues**. Outside that window the biophysical
+`calculate_samp` surrogate is substituted per sequence, changing what the
+objective measures. `progress.log` therefore carries an **`amp_src`** column —
+`macrel` or `proxy` — per row. Check it before interpreting `amp_prob` from any
+run whose population approached 100 aa.
+
+## Before you launch: `preflight.sh`
+
+Every launcher sources `preflight.sh`, which aborts if MACREL, HemoPI2 or ESM3
+are not callable and probes magainin-2 end-to-end to confirm MACREL answered
+rather than the surrogate.
+
+This exists because the v2 series — four runs, ~60 h — completed with neither
+classifier installed. `score.py` fell back per sequence, warned only on stderr,
+and each run's header still printed "MACREL AMP + PFES". Every `amp_prob` in
+that series was the surrogate. **`conda activate pfes_amps` resolves to
+whichever env of that name comes first, and only one has macrel.**
 
 ## Install
 
 ```bash
-git clone https://github.com/aposfys/PFES-AMPs.git && cd PFES-AMPs
-git checkout fitness-pfes-macrel
-
 conda create -n pfes_amps python=3.11 -y && conda activate pfes_amps
-pip install torch --index-url https://download.pytorch.org/whl/cpu   # drop --index-url for GPU
+pip install torch --index-url https://download.pytorch.org/whl/cpu
 pip install -r requirements.txt
-pip install "numpy<2" "pillow<12"          # HemoPI2/scikit-learn need numpy < 2
-
 conda install -c bioconda -c conda-forge macrel -y
-
-# psique (secondary structure) is bundled — bin/psique + psique.py, nothing to install
-# ESM3 needs a token; accept the licence at
-#   huggingface.co/EvolutionaryScale/esm3-sm-open-v1
-export HF_TOKEN=your_token_here
+export HF_TOKEN=...      # huggingface.co/EvolutionaryScale/esm3-sm-open-v1
+./preflight.sh           # must pass before any run
 ```
 
-Verify:
-
-```bash
-python -c "from esm.models.esm3 import ESM3; print('ESM3 ok')"
-python -c "import score; print(score.macrel_score_batch(['GIGKFLHSAKKFGKAFVGEIMNS']))"
-```
+`requirements.txt` pins `onnxruntime<=1.25.1`: 1.26 changed the shape of ONNX
+`output_probability`, so MACREL returned raw decision values instead of
+calibrated probabilities — magainin-2 came back at **−0.050**, classified NOT an
+AMP, sending every candidate to the surrogate. `psique` is bundled
+(`bin/psique`); no install needed.
 
 ## Run
 
-**1. Seed database and hemolysis labels** (once):
-
 ```bash
-export PFES_AMP_DB=$PWD/data/dbaasp.faa
-python amp_db.py --fetch          # ~10,700 validated AMPs from DRAMP
-python amp_db.py --annotate-hemo  # a HemoPI2 label per database peptide
-```
-
-**2. A starting population.** The production series does not use `amp_db.py` for this —
-its three sets are built by the scripts in `production/` and shipped in
-`production/init/` and `production/init_varlen/`. For a quick run:
-
-```bash
-python amp_db.py --make-init --pop 100 --frac-existing 0.5 --seed 42 -o init_mix.faa
-```
-
-**3. Smoke test** before committing to a full run:
-
-```bash
-python pfes.py --start file --start-file init_mix.faa -ps 8 -ng 3 -sm weak -b 20 -o /tmp/smoke
-```
-
-No "falling back" warnings, and a `hemo_prob` column that varies, means MACREL and
-HemoPI2 both engaged.
-
-**4. The full run**, as the production series was launched:
-
-```bash
-python pfes.py \
-  --start file --start-file production/init/init_fragments.faa \
-  -ps 100 -ng 600 -sm weak -b 20 \
-  -pl0 30 -hl0 30 -bl0 12 \
+python pfes.py --start file --start-file init/init_fragments.faa \
+  -ps 100 -ng 600 -sm weak -b 20 --strong_selection_after_n_gen 480 \
   --norepeat --max-tokens-per-batch 4096 \
-  -o results/fragments-r1
+  -o results/frag-r1 2>&1 | tee results/frag-r1.console.log
 ```
 
-Run it inside `tmux`, so a disconnect cannot kill it.
+Starting populations come from `analysis/make_init_sets.py` (`--random`,
+`--uniprot`, `--orfs`); each arm is AMP-screened, topped up to `--pop`, and
+writes a provenance TSV. Reuse the same file across both branches so every arm
+starts identically.
 
-**5. Analyse:**
+## Analyse
 
 ```bash
-python visual_pfes.py -l results/fragments-r1/progress.log \
-  -s results/fragments-r1/structures -o results/fragments-r1/analysis --notraj
+python visual_pfes.py -l results/frag-r1/progress.log -s results/frag-r1/structures \
+       -o results/frag-r1/analysis --notraj
+python analysis/score_posthoc.py results/frag-r1/ -o results/comparison
 ```
 
-## Options that matter
-
-| Flag | Default | Meaning |
-|---|---|---|
-| `--start {random,randoms,existing,mix,file}` | random | starting population; `file` loads `--start-file` |
-| `--start-file PATH` | — | a fixed init FASTA — how every controlled comparison is set up |
-| `-ng` / `-ps` | 100 / 10 | generations / population size |
-| `-sm` / `-b` | weak / 1 | selection: `weak` (Gibbs, β via `-b`), `weak2`, `strong` |
-| `-pl0` / `-hl0` / `-bl0` | 30 / 20 / 12 | length / helix / β-strand penalty thresholds |
-| `--hemo-in-score` | off | put hemolysis back into the fitness |
-| `--norepeat` | off | never re-evaluate a sequence already seen |
-| `--max-tokens-per-batch` | 512 | fold batch size; ~4096 minimises classifier reloads |
-
-## Output
-
-`<outdir>/progress.log` is tab-separated with a `#`-prefixed banner recording the exact
-invocation. One row per surviving individual per generation, nineteen columns:
-
-`gndx` `id` `seq_len` · `prot_len_penalty` `max_alpha_penalty` `max_beta_penalty` ·
-`ptm` `mean_plddt` `num_conts` `iplddt` `num_inter_conts` · `sel_mode` ·
-`amp_prob` (MACREL) `hemo_prob` (HemoPI2) · `score` `sequence` `mutation` `prev_id` `ss`
-
-Note that `gndx` is a **string** (`gndx0`, `gndx1`, …), not an integer. Structures are
-written as gzipped PDB to `<outdir>/structures/` — sixty thousand of them for a
-100 × 600 run, about 244 MB.
+`score_posthoc.py` re-scores survivors with **AMPlify** (Li et al. 2022), an
+attentive BiLSTM unrelated to MACREL's random forest that never saw the search,
+so its agreement is independent evidence in a way MACREL's own score is not. It
+needs its own environment:
+`export AMPLIFY_CMD="conda run -n amplify AMPlify"`.
 
 ## Reproducibility
 
-Runs are **not** reproducible, matching upstream PFES, which seeds no random number
-generator anywhere. Mutation, survivor sampling and random-sequence generation all draw
-from OS entropy, so the same command produces a different trajectory every time. Repeat
-runs are independent samples of one process, which is what makes replication across runs
-meaningful — but an individual result cannot be regenerated and has to be preserved from
-its log.
-
-The starting population is the one thing that *is* fixed, and it is fixed by a file
-rather than a seed: build it once, then pass the same `--start-file` to every arm.
-
-## Known constraints
-
-**MACREL is defined for 10–100 residues.** Outside that window `macrel_score_batch`
-falls back to the `calculate_samp` biophysical proxy, silently and per sequence, so the
-objective can change identity mid-run if chains grow past 100 residues. This is not
-hypothetical: the fold-only arm reached 93 residues by generation 300. Either cap length
-or log which scorer produced each value.
-
-**A length target far above where the population settles is inert.** The penalty is a
-logistic in `-pl0` with steepness hard-coded at `pfes.py:237`; set the target high enough
-and it saturates at 0.999 and stops selecting on anything. Condition B of the production
-series is exactly this case, deliberately — see `production/README.md`.
-
-**Deduplication cost grows quadratically.** `--norepeat` scans the whole
-`ancestral_memory` for every candidate, and that table gains `-ps` rows per generation,
-so runtime is not linear in `-ng`.
-
-## Hardware
-
-Upstream PFES was developed and tested on Rocky Linux 8.7 with NVIDIA V100 and A100
-GPUs. **The twelve production runs here ran on CPU** — every one logs `ready [cpu]` at
-startup — so the fork is exercised on a path upstream did not report.
-
-This does not change what is computed. Device selection at `pfes.py:930` only chooses
-where ESM3 runs; MACREL, HemoPI2 and PSIQUE are CPU tools on either platform. The one
-place the code branches on device is `use_threads = device.type != 'cpu'`, which
-overlaps the scoring thread of one batch with the folding of the next: a pipelining
-optimisation on GPU, serial on CPU, identical arithmetic either way.
-
-What it does change is throughput, and that shaped the protocol — six hundred
-generations rather than the several thousand of the original, with selection sharpened
-to compensate. Anyone reproducing on a GPU should expect the same distribution of
-outcomes but not the same numbers, since ESM3 matmuls run in reduced precision under
-TF32 on Ampere while CPU stays at full fp32. That is moot in practice: nothing here is
-bit-reproducible on any hardware, because no random number generator is seeded.
-
-A third path exists and is a fork addition: Apple MPS is checked *before* CUDA, and a
-monkeypatch at the top of `pfes.py` disables ESM3's fp32 autocast there because MPS does
-not implement it. That path is untested at scale and was not used for any reported run.
-
-## Licence
-
-Public domain (Unlicense), as upstream. See [LICENSE](LICENSE).
+Runs are **not** reproducible, matching upstream PFES, which seeds no RNG.
+Mutation, survivor sampling and random-sequence generation draw from OS entropy.
+Repeat runs are independent samples of the same process — which is what makes
+replication meaningful — but an individual trajectory cannot be regenerated and
+must be preserved from its log and `structures/`. The starting population is the
+one thing that is fixed, and it is fixed by a file, not a seed.
