@@ -1,5 +1,6 @@
 import numpy as np
 import sys, os
+import tempfile
 import math
 import pandas as pd
 
@@ -535,6 +536,134 @@ def hemopi2_score_batch(sequences, model=1):
         return fallback
 
 
+def _macrel_subprocess(sequences):
+    """The documented CLI path. Returns {normalised_sequence: amp_probability}."""
+    import subprocess, glob as _glob
+    with tempfile.TemporaryDirectory() as tmpdir:
+        fasta_path = os.path.join(tmpdir, 'batch.faa')
+        with open(fasta_path, 'w') as fh:
+            for i, seq in enumerate(sequences):
+                fh.write(f'>seq{i}\n{seq}\n')
+        clean_env = {k: v for k, v in os.environ.items()
+                     if not k.startswith('Malloc')}
+        # --keep-negatives is REQUIRED: macrel's default emits only sequences it
+        # classifies as AMP, so every candidate below the decision threshold
+        # would be absent and fall through to the surrogate. Fatal for an
+        # optimisation target, whose whole point is to score candidates that are
+        # NOT yet active so selection has a gradient to climb.
+        result = subprocess.run(
+            ['macrel', 'peptides', '--fasta', fasta_path,
+             '--output', tmpdir, '--force', '--keep-negatives'],
+            capture_output=True, text=True, timeout=300, env=clean_env)
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip())
+        pred_files = _glob.glob(os.path.join(tmpdir, '*.prediction.gz'))
+        if not pred_files:
+            raise FileNotFoundError('no .prediction.gz in macrel output')
+        df = pd.read_csv(pred_files[0], sep='\t', comment='#', compression='gzip')
+        return {str(r['Sequence']): float(r['AMP_probability'])
+                for _, r in df.iterrows()}
+
+
+# --------------------------------------------------------------------------- #
+# In-process classifiers
+#
+# MACREL and HemoPI2 are invoked once per generation as subprocesses, and each
+# invocation re-loads its model. Measured against the v2 series -- which ran the
+# identical pipeline with neither installed, falling back to in-process proxies
+# -- the two subprocesses account for ~60 s of an 88.6 s generation at pop 100,
+# against 5.8 s for ESM3 folding. They are the pipeline's bottleneck, and the
+# cost is per-generation reload rather than inference, so it does not amortise
+# over a larger population.
+#
+# Loading each model ONCE per process removes that. The risk is that it means
+# calling library internals rather than the documented CLI, and this project has
+# already been burned twice by a classifier that silently returned the wrong
+# numbers. So the fast path is self-validating: on first use it is checked
+# against the subprocess on a known peptide, and any disagreement beyond
+# tolerance disables it permanently for the life of the process. It can never
+# quietly produce different numbers than the path it replaces.
+#
+# Set PFES_NO_INPROC=1 to force the subprocess path.
+# --------------------------------------------------------------------------- #
+
+_INPROC = {}          # name -> callable | False (tried and unavailable)
+_INPROC_TOL = 1e-3
+
+
+def _macrel_inproc():
+    """A callable(list[str]) -> {seq: amp_prob}, or None if unavailable."""
+    if 'macrel' in _INPROC:
+        return _INPROC['macrel'] or None
+    if os.environ.get('PFES_NO_INPROC') == '1':
+        _INPROC['macrel'] = False
+        return None
+    try:
+        import macrel, pandas as _pd
+        from macrel import AMP_predict as _ap
+        from macrel import macrel_features as _mf
+        _data = os.path.join(os.path.dirname(macrel.__file__), 'data')
+        _model = None
+        for cand in ('AMP.pkl.gz', 'amp.pkl.gz'):
+            if os.path.exists(os.path.join(_data, cand)):
+                _model = os.path.join(_data, cand)
+                break
+        if _model is None or not hasattr(_ap, 'predict'):
+            raise ImportError('macrel model or predict() not found')
+
+        def _run(seqs):
+            with tempfile.TemporaryDirectory() as td:
+                fa = os.path.join(td, 'b.faa')
+                with open(fa, 'w') as fh:
+                    for i, q in enumerate(seqs):
+                        fh.write(f'>s{i}\n{q}\n')
+                feats = _mf.features(fa)
+                out = _ap.predict(_model, feats, keep_negatives=True)
+                return {str(r['Sequence']): float(r['AMP_probability'])
+                        for _, r in out.iterrows()}
+        _INPROC['macrel'] = _run
+        return _run
+    except Exception as e:
+        sys.stderr.write(f'  in-process MACREL unavailable ({type(e).__name__}: {e}); '
+                         'using the subprocess path\n')
+        _INPROC['macrel'] = False
+        return None
+
+
+def macrel_inproc_agrees(probe='GIGKFLHSAKKFGKAFVGEIMNS'):
+    """
+    True if the in-process path reproduces the subprocess path on `probe`.
+
+    Called by preflight.sh and on first use. A False here disables the fast
+    path rather than accepting its numbers: an objective that silently changes
+    identity is the failure this whole guard exists to prevent.
+    """
+    fast = _macrel_inproc()
+    if fast is None:
+        return False
+    try:
+        a = fast([probe]).get(_macrel_key(probe))
+        b = _macrel_subprocess([probe]).get(_macrel_key(probe))
+    except Exception:
+        _INPROC['macrel'] = False
+        return False
+    if a is None or b is None or abs(a - b) > _INPROC_TOL:
+        sys.stderr.write(f'  in-process MACREL disagrees with the subprocess '
+                         f'({a} vs {b}); disabling the fast path\n')
+        _INPROC['macrel'] = False
+        return False
+    return True
+
+
+def _macrel_key(s):
+    """MACREL reports the normalised sequence: leading M and trailing * removed."""
+    if s and s[0] == 'M':
+        s = s[1:]
+    if s and s[-1] == '*':
+        s = s[:-1]
+    return s
+
+
 def macrel_score_batch_src(sequences):
     """
     As macrel_score_batch, but returns 3-tuples
@@ -558,11 +687,39 @@ def macrel_score_batch_src(sequences):
     HemoPI2 is unavailable). HemoPI2 replaces MACREL's own hemolytic output,
     which saturated to 0.000 on the evolved sequences and gave no gradient.
     """
-    import subprocess, tempfile, glob as _glob
+    import subprocess, glob as _glob
     if not sequences:
         return {}
     # Hemolytic probability for the whole batch (one HemoPI2 call).
     hemo_scores = hemopi2_score_batch(sequences)
+
+    # Fast path: model loaded once per process rather than once per generation.
+    # Used only after it has been shown to reproduce the subprocess on a known
+    # peptide; see macrel_inproc_agrees().
+    if _INPROC.get('macrel') is None:
+        macrel_inproc_agrees()
+    _fast = _INPROC.get('macrel') or None
+    if _fast is not None:
+        try:
+            seq_map = _fast(sequences)
+            miss = [q for q in sequences if _macrel_key(q) not in seq_map]
+            if miss:
+                lens = sorted({len(q) for q in miss})
+                sys.stderr.write(
+                    f'  Warning: MACREL returned no score for {len(miss)}/'
+                    f'{len(sequences)} sequence(s), lengths {lens[0]}-{lens[-1]}. '
+                    'Biophysical proxy substituted for those.\n')
+            return {
+                q: (seq_map.get(_macrel_key(q), calculate_samp(q)),
+                    hemo_scores[q],
+                    'macrel' if _macrel_key(q) in seq_map else 'proxy')
+                for q in sequences
+            }
+        except Exception as e:
+            sys.stderr.write(f'  in-process MACREL failed mid-run '
+                             f'({type(e).__name__}: {e}); reverting to the '
+                             'subprocess for the rest of this process\n')
+            _INPROC['macrel'] = False
     fallback = {seq: (calculate_samp(seq), hemo_scores[seq], 'proxy')
                 for seq in sequences}
     try:
