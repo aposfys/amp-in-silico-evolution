@@ -592,24 +592,48 @@ _INPROC_TOL = 1e-3
 
 
 def _macrel_inproc():
-    """A callable(list[str]) -> {seq: amp_prob}, or None if unavailable."""
+    """
+    A callable(list[str]) -> {normalised_sequence: amp_prob}, or None.
+
+    The saving is NOT simply "call the library instead of the CLI".
+    macrel.AMP_predict.predict() opens and deserialises both ONNX models on
+    every invocation:
+
+        with gzip.open(model1, 'rb') as f:
+            model1 = rt.InferenceSession(f.read(), ...)
+
+    so calling it in-process would reload the models exactly as often as the
+    subprocess does. The reload IS the cost. This holds one InferenceSession
+    for the lifetime of the process and runs inference directly against it.
+
+    Only the AMP model is loaded. macrel's second model is its hemolytic
+    classifier, which this pipeline does not use -- it saturated to 0.000 on
+    evolved cationic sequences and HemoPI2 replaced it -- so loading it would
+    double the startup for a column that is thrown away.
+
+    Feature construction and the ['AMP'] extraction deliberately mirror
+    AMP_predict.predict() exactly, including reading features from column 2
+    onward. That extraction is the line onnxruntime 1.26 broke by changing the
+    shape of output_probability, which is why requirements.txt pins
+    onnxruntime<=1.25.1; behaving identically to macrel here means the pin
+    protects this path too.
+    """
     if 'macrel' in _INPROC:
         return _INPROC['macrel'] or None
     if os.environ.get('PFES_NO_INPROC') == '1':
         _INPROC['macrel'] = False
         return None
     try:
-        import macrel, pandas as _pd
-        from macrel import AMP_predict as _ap
-        from macrel import macrel_features as _mf
-        _data = os.path.join(os.path.dirname(macrel.__file__), 'data')
-        _model = None
-        for cand in ('AMP.pkl.gz', 'amp.pkl.gz'):
-            if os.path.exists(os.path.join(_data, cand)):
-                _model = os.path.join(_data, cand)
-                break
-        if _model is None or not hasattr(_ap, 'predict'):
-            raise ImportError('macrel model or predict() not found')
+        import gzip as _gz
+        import onnxruntime as _rt
+        import macrel
+        from macrel import AMP_features as _af
+
+        _model = os.path.join(os.path.dirname(macrel.__file__),
+                              'data', 'models', 'AMP.onnx.gz')
+        with _gz.open(_model, 'rb') as fh:
+            _sess = _rt.InferenceSession(
+                fh.read(), providers=["CPUExecutionProvider"])
 
         def _run(seqs):
             with tempfile.TemporaryDirectory() as td:
@@ -617,10 +641,16 @@ def _macrel_inproc():
                 with open(fa, 'w') as fh:
                     for i, q in enumerate(seqs):
                         fh.write(f'>s{i}\n{q}\n')
-                feats = _mf.features(fa)
-                out = _ap.predict(_model, feats, keep_negatives=True)
-                return {str(r['Sequence']): float(r['AMP_probability'])
-                        for _, r in out.iterrows()}
+                data = _af.fasta_features(fa)
+            if not len(data):
+                return {}
+            feats = data.iloc[:, 2:].values.astype(np.float32)
+            [prob] = _sess.run(['output_probability'],
+                               {'input_features': feats})
+            amp = [float(x['AMP']) for x in prob]
+            # data['sequence'] is already macrel-normalised (leading M stripped)
+            return dict(zip(data['sequence'].astype(str), amp))
+
         _INPROC['macrel'] = _run
         return _run
     except Exception as e:
