@@ -69,6 +69,20 @@ PY
     fi
 fi
 
+# Which MACREL path will this run use? The in-process path loads the model once
+# instead of once per generation -- worth ~60 s of an 88.6 s generation at
+# pop 100 -- but it calls library internals rather than the documented CLI, so
+# it is used only after reproducing the subprocess on a known peptide. Report
+# the answer here rather than leaving it to be inferred from the runtime.
+if [ "$_pf_fail" = "0" ]; then
+    _pf_path=$(python - <<'PY' 2>/dev/null
+import score
+print("in-process (fast)" if score.macrel_inproc_agrees() else "subprocess (per-generation model reload)")
+PY
+)
+    echo "  macrel path: ${_pf_path:-unknown}"
+fi
+
 if [ "$_pf_fail" != "0" ]; then
     echo "--- preflight FAILED — refusing to start ---"
     exit 1
