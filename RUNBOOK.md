@@ -51,9 +51,26 @@ a mid-run exception reverts to the subprocess, `PFES_NO_INPROC=1` forces the
 slow path, and `preflight.sh` prints which path the run will use. It cannot
 quietly produce numbers the subprocess would not.
 
-Still un-fixed and worth doing next: **PSIQUE spawns one subprocess per
-structure.** At pop 400 that is 400 spawns per generation and it is the largest
-remaining term after the classifiers.
+### Still open, and measure before you touch it
+
+The 22.2 s/generation bucket is ~222 ms per candidate at pop 100. Measured on
+this machine, the process and bookkeeping overhead inside it is **~6.5 ms**:
+`pypsique` spawns a shell, psique and awk (~4.1 ms), `os.system` spawns another
+shell for the backgrounded gzip (~2.2 ms), and the per-candidate DataFrame plus
+concat is ~0.2 ms. Under 3 %. **Batching the subprocesses away is not worth
+doing.**
+
+That leaves ~215 ms per structure unaccounted for, and psique's own runtime is
+by far the likeliest home for it. Two caveats: the figure is arrived at by
+subtraction rather than observation, and `bin/psique` is a Linux x86-64 ELF
+that cannot be timed on an Apple Silicon machine. **Time one `pypsique` call on
+the Linux box before changing anything** — it is a five-minute check and it
+decides whether there is a problem here at all.
+
+If psique is confirmed as the cost, the fix is an optimised build (the bundled
+binary carries debug info and is unstripped, which is suggestive but not proof)
+or in-process secondary-structure assignment such as biotite's `annotate_sse`,
+which implements P-SEA and needs no subprocess.
 
 ## The series
 
@@ -82,6 +99,13 @@ that the corrected score scale would imply. See the open question below.
 |---|---|---|---|
 | before the fixes | 192–232 | 53–64 h | **13.3–16.1 days** |
 | with MACREL in-process | ~122 | ~34 h | **~8.5 days** |
+
+The second row is a projection, not a measurement, and it rests on an
+assumption worth stating: only **MACREL** was moved in-process. **HemoPI2 is
+still a per-generation subprocess** that reloads its model every call, and it
+is the more likely of the two to dominate — one v3 run logged eleven 600-second
+HemoPI2 timeouts. How the 60.6 s splits between the two was never measured.
+Time both on the first run and re-derive this table before planning around it.
 
 For reference the v3 series was 8 runs, pop 100 × 600 generations, **78.6 h
 (3.27 days) wall** with runs overlapping in streams.
