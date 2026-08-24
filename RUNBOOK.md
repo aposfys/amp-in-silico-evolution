@@ -13,6 +13,8 @@ Per generation, v3 `sorf-r1`, pop 100, 600 generations, 14.77 h wall:
 |---|---|---|---|
 | ESM3 folding | 5.8 | **6.5 %** | population — *the only thing a GPU touches* |
 | MACREL + HemoPI2 subprocesses | 60.6 | 68.4 % | per-invocation model reload, **not** population |
+| ├─ MACREL (measured) | 0.35 | 0.4 % | subprocess; now in-process, 71.5× |
+| └─ HemoPI2 (by subtraction) | ~60.2 | ~68 % | **the actual bottleneck — untouched** |
 | PSIQUE + contacts + bookkeeping | 22.2 | 25.0 % | population (PSIQUE is one subprocess **per structure**) |
 
 Derivation: three clean v2 runs averaged **28.0 s/generation** with proxies
@@ -39,7 +41,7 @@ as the population grows.
 
 | Fix | Commit | Effect |
 |---|---|---|
-| MACREL model loaded once per process, not per generation | `macrel: load the model once…` | the 68 % term; self-validating, see below |
+| MACREL model loaded once per process, not per generation | `macrel in-process: fix against the real API…` | 71.5× on MACREL, but only **0.35 s/gen** — MACREL was never the bottleneck |
 | `--norepeat` dedup indexed by sequence | `dedup: index the ancestral memory…` | 7.4 ms → 0.022 µs per test at 400 k rows (**330,000×**); removes a `pop² × gen²` wall |
 | `preflight.sh` on every launcher | `Add the preflight guard…` | refuses to start if a classifier is missing — the v2 failure |
 
@@ -100,12 +102,21 @@ that the corrected score scale would imply. See the open question below.
 | before the fixes | 192–232 | 53–64 h | **13.3–16.1 days** |
 | with MACREL in-process | ~122 | ~34 h | **~8.5 days** |
 
-The second row is a projection, not a measurement, and it rests on an
-assumption worth stating: only **MACREL** was moved in-process. **HemoPI2 is
-still a per-generation subprocess** that reloads its model every call, and it
-is the more likely of the two to dominate — one v3 run logged eleven 600-second
-HemoPI2 timeouts. How the 60.6 s splits between the two was never measured.
-Time both on the first run and re-derive this table before planning around it.
+The second row is **wrong** and is kept only to show what the assumption cost.
+It assumed moving MACREL in-process roughly halves the classifier budget.
+Measured with macrel installed: the MACREL subprocess is **350 ms**, so the
+in-process path saves 0.35 s of an 88.6 s generation — 0.4 %. By subtraction
+**HemoPI2 is ~60 s per generation, essentially the entire classifier budget**,
+and it is untouched. One v3 run logged eleven 600-second HemoPI2 timeouts,
+which is consistent.
+
+**HemoPI2 is the fix.** Two routes, and the choice is a design decision rather
+than an optimisation: cache its model in-process the way MACREL now is, or stop
+scoring it every generation. Hemolysis is an *attribute* that never enters the
+fitness, so the second is available on the same argument that puts AMPlify
+post-hoc — except §2.4.7.3 defends per-generation logging for trajectory
+claims, so it costs something real. `PFES_SKIP_HEMO=1` already exists and turns
+an 88.6 s generation into roughly 28 s.
 
 For reference the v3 series was 8 runs, pop 100 × 600 generations, **78.6 h
 (3.27 days) wall** with runs overlapping in streams.
