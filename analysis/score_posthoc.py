@@ -49,7 +49,7 @@ from matplotlib.lines import Line2D
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)                      # compare_runs.py, alongside
 sys.path.insert(0, os.path.dirname(_HERE))     # score.py, at the repo root
-from compare_runs import (load_run, gen_of, fnum, global_best,   # noqa: E402
+from compare_runs import (load_run, gen_of, fnum, global_best, lineage,  # noqa: E402
                           longest_helix, C, LABEL, style, save)
 
 # Net charge at pH 7.4. Histidine is counted at +0.1, its approximate
@@ -278,6 +278,38 @@ def fig_charge_length(recs, natural, source, outdir):
 
 
 # --------------------------------------------------------------------------- #
+
+def fig_divergence(traj, outdir):
+    """
+    MACREL against AMPlify along the ancestral line, versus generation.
+
+    The endpoint comparison in `posthoc_classifiers` answers whether the two
+    classifiers agree about the winners. It cannot answer when they stopped
+    agreeing, and that is the more diagnostic question: MACREL drives
+    selection, so if the search is exploiting MACREL-specific artefacts rather
+    than finding real antimicrobial character, the signature is AMPlify
+    tracking MACREL early and flattening or falling while MACREL keeps
+    climbing. A gap that is present from generation zero means the two models
+    simply disagree about this sequence family; a gap that OPENS over the
+    trajectory is evidence of specification gaming.
+    """
+    if not traj:
+        return
+    fig, ax = plt.subplots(figsize=(5.4, 3.4))
+    for name, g, mac, amp in traj:
+        st = style(name) if callable(style) else {}
+        ax.plot(g, mac, lw=1.4, **st)
+        ax.plot(g, amp, lw=1.4, ls="--", **st)
+    ax.set_xlabel("generation")
+    ax.set_ylabel("P(antimicrobial)")
+    ax.set_ylim(-0.02, 1.05)
+    ax.legend(handles=[Line2D([], [], color="0.35", lw=1.4, label="MACREL (drives selection)"),
+                       Line2D([], [], color="0.35", lw=1.4, ls="--", label="AMPlify (independent)")],
+              fontsize=7, frameon=False, loc="lower right")
+    ax.set_title("Classifier agreement along the ancestral line", fontsize=9)
+    save(fig, outdir, "posthoc_divergence")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -285,6 +317,17 @@ def main():
     ap.add_argument("-o", "--outdir", default="comparison")
     ap.add_argument("-n", "--top-n", type=int, default=10,
                     help="candidates from the final generation per run (default 10)")
+    ap.add_argument("--lineage", action="store_true",
+                    help="also score the ancestral line per run and plot "
+                         "classifier agreement against generation. The line is "
+                         "short -- 28 to 49 sequences on the v3 runs, because a "
+                         "generation whose winner was carried over unchanged "
+                         "adds no member -- so this is one extra batched call "
+                         "per run, not a second search")
+    ap.add_argument("--lineage-stride", type=int, default=1,
+                    help="score every Nth member of the line (default 1: the "
+                         "line is short enough that striding only loses "
+                         "resolution)")
     ap.add_argument("--model", default="balanced",
                     choices=["balanced", "imbalanced"])
     args = ap.parse_args()
@@ -331,6 +374,57 @@ def main():
     natural, source = natural_reference(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     fig_charge_length(recs, natural, source, args.outdir)
+
+    # --- classifier agreement ALONG the trajectory -------------------------
+    # The endpoint comparison says whether MACREL and AMPlify agree about the
+    # winners; it cannot say when they stopped agreeing. Scored on the
+    # ancestral line rather than the whole population: ~600 rows per run
+    # before striding, against ~120,000 evaluations, so one extra batched call
+    # per run rather than a second search.
+    traj = []
+    if args.lineage:
+        print("\nscoring ancestral lines...")
+        lin_seqs, per_run = set(), []
+        for run in runs:
+            line = lineage(run["rows"])[:: max(1, args.lineage_stride)]
+            pts = [(gen_of(r), r.get("sequence", "")) for r in line
+                   if r.get("sequence")]
+            if not pts:
+                continue
+            per_run.append((run["name"], pts))
+            lin_seqs.update(s for _, s in pts)
+        lin_seqs = sorted(lin_seqs)
+        print(f"  {len(per_run)} line(s), {len(lin_seqs)} unique sequences")
+        if lin_seqs:
+            lmac, _ = macrel_hemo(lin_seqs)
+            lamp = amplify_scores(lin_seqs, args.model)
+            nan = float("nan")
+            for name, pts in per_run:
+                g = [p[0] for p in pts]
+                traj.append((name, g,
+                             [lmac.get(p[1], nan) for p in pts],
+                             [lamp.get(p[1], nan) for p in pts]))
+            with open(os.path.join(args.outdir, "posthoc_lineage.tsv"), "w") as fh:
+                fh.write("run\tgeneration\tmacrel\tamplify\tsequence\n")
+                for (name, pts), (_, g, m, a) in zip(per_run, traj):
+                    for (gen, sq), mv, av in zip(pts, m, a):
+                        fh.write(f"{name}\t{gen}\t{mv:.3f}\t{av:.3f}\t{sq}\n")
+            print("  posthoc_lineage.tsv")
+            fig_divergence(traj, args.outdir)
+
+            # Does the gap OPEN over the trajectory? That is the diagnostic,
+            # not the gap's size at any single point.
+            for name, g, m, a in traj:
+                pair = [(gg, mm - aa) for gg, mm, aa in zip(g, m, a)
+                        if mm == mm and aa == aa]
+                if len(pair) < 10:
+                    continue
+                k = max(1, len(pair) // 5)
+                early = np.mean([d for _, d in pair[:k]])
+                late = np.mean([d for _, d in pair[-k:]])
+                flag = "  <-- gap widens" if late - early > 0.15 else ""
+                print(f"    {name:26s} MACREL-AMPlify  first fifth {early:+.3f}"
+                      f"  last fifth {late:+.3f}{flag}")
 
     ok = [r for r in recs if r["amplify"] == r["amplify"]]
     if ok:
