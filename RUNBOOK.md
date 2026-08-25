@@ -53,26 +53,34 @@ a mid-run exception reverts to the subprocess, `PFES_NO_INPROC=1` forces the
 slow path, and `preflight.sh` prints which path the run will use. It cannot
 quietly produce numbers the subprocess would not.
 
-### Still open, and measure before you touch it
+### Measured on the production node (HPC7)
 
-The 22.2 s/generation bucket is ~222 ms per candidate at pop 100. Measured on
-this machine, the process and bookkeeping overhead inside it is **~6.5 ms**:
-`pypsique` spawns a shell, psique and awk (~4.1 ms), `os.system` spawns another
-shell for the backgrounded gzip (~2.2 ms), and the per-candidate DataFrame plus
-concat is ~0.2 ms. Under 3 %. **Batching the subprocesses away is not worth
-doing.**
+The estimates above were replaced by direct measurement. One was badly wrong.
 
-That leaves ~215 ms per structure unaccounted for, and psique's own runtime is
-by far the likeliest home for it. Two caveats: the figure is arrived at by
-subtraction rather than observation, and `bin/psique` is a Linux x86-64 ELF
-that cannot be timed on an Apple Silicon machine. **Time one `pypsique` call on
-the Linux box before changing anything** — it is a five-minute check and it
-decides whether there is a problem here at all.
+| | measured | my earlier estimate |
+|---|---|---|
+| `pypsique` | **7.8 ms / structure** | ~215 ms — **off by 27×** |
+| HemoPI2 | **57.7 s / generation** | ~60 s ✓ |
+| MACREL | contaminated probe¹ | 350 ms (on a laptop) |
 
-If psique is confirmed as the cost, the fix is an optimised build (the bundled
-binary carries debug info and is unstripped, which is suggestive but not proof)
-or in-process secondary-structure assignment such as biotite's `annotate_sse`,
-which implements P-SEA and needs no subprocess.
+¹ `macrel_score_batch_src` calls `hemopi2_score_batch` internally, so timing it
+measures both. Use `score._macrel_subprocess` against `score._macrel_inproc()`
+for a clean comparison.
+
+**There is no psique problem.** At 7.8 ms it is 0.78 s of a generation at
+pop 100 — under 1 %. The ~215 ms figure came from attributing everything
+unexplained to psique, which was never sound reasoning.
+
+**HemoPI2 is 65 % of a generation** — 57.7 s of 88.6 s, or 16 h of a
+1000-generation run, for a column that never enters the fitness.
+
+`--hemo-every N` samples it instead. One caveat that matters: `hemo_prob` is
+cached with the sequence, so a molecule first evaluated in an unmeasured
+generation **keeps NaN for as long as it survives, including into the final
+population** — and screening candidates by hemolysis is the point. Recover it
+post-hoc: `score_posthoc.py` scores HemoPI2 for the audited candidates, and
+with `--lineage` along the whole ancestral line, so the trajectory survives a
+sparsely-sampled run.
 
 ## The series
 
