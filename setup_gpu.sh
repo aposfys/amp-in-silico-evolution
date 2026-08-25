@@ -27,17 +27,28 @@ else
     echo "           environment and there is no point running it on this host."
 fi
 
-# Pick the torch wheel from the driver's CUDA version. The driver is backward
-# compatible, so a cu121 wheel runs on a 12.4 driver, but not the reverse.
+# Pick the torch wheel from the GPU's COMPUTE CAPABILITY first, then the
+# driver. Compute capability is the binding constraint: a wheel without kernels
+# for the architecture cannot drive the card no matter how new the driver is.
+# Blackwell (sm_120, e.g. RTX 5090) needs cu128 or later -- cu124 has no
+# Blackwell kernels and fails at launch, which the driver version alone does not
+# reveal, since a Blackwell card ships with a CUDA 13 driver that would
+# otherwise select cu124.
 CU_TAG=cu121
 if command -v nvidia-smi >/dev/null 2>&1; then
+    CC=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d ' ')
     DRV=$(nvidia-smi 2>/dev/null | grep -o 'CUDA Version: [0-9.]*' | head -1 | grep -o '[0-9.]*')
-    case "$DRV" in
-        12.[6-9]*|13.*) CU_TAG=cu124 ;;
-        12.[1-5]*)      CU_TAG=cu121 ;;
-        11.*)           CU_TAG=cu118 ;;
-    esac
-    echo "  driver CUDA ${DRV:-unknown} -> torch wheel $CU_TAG"
+    CC_MAJOR=${CC%%.*}
+    if [ -n "$CC_MAJOR" ] && [ "$CC_MAJOR" -ge 12 ] 2>/dev/null; then
+        CU_TAG=cu128                       # Blackwell and later
+    else
+        case "$DRV" in
+            12.[6-9]*|13.*) CU_TAG=cu124 ;;
+            12.[1-5]*)      CU_TAG=cu121 ;;
+            11.*)           CU_TAG=cu118 ;;
+        esac
+    fi
+    echo "  compute capability ${CC:-unknown}, driver CUDA ${DRV:-unknown} -> torch wheel $CU_TAG"
 fi
 
 say "conda environment: $ENV_NAME"
@@ -59,7 +70,16 @@ if not torch.cuda.is_available():
     print("      is too old for this wheel. Fix this before continuing. ***")
     sys.exit(1)
 p = torch.cuda.get_device_properties(0)
-print(f"  sees: {p.name}  {p.total_memory/1e9:.1f} GB")
+print(f"  sees: {p.name}  {p.total_memory/1e9:.1f} GB  sm_{p.major}{p.minor}")
+# is_available() can be True while the wheel lacks kernels for this
+# architecture, which only shows up at launch. Force an actual kernel.
+try:
+    (torch.randn(64, 64, device="cuda") @ torch.randn(64, 64, device="cuda")).sum().item()
+    print("  kernel launch: ok")
+except Exception as e:
+    print(f"  *** kernel launch FAILED: {e}")
+    print(f"  *** the wheel has no kernels for sm_{p.major}{p.minor}. Install a newer CUDA build.")
+    sys.exit(1)
 PY
 [ $? -eq 0 ] || die "torch cannot see the GPU"
 
