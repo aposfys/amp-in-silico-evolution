@@ -428,7 +428,11 @@ def fold_evolver(args, model, evolver, logheader, init_gen, device) -> None:
                 trd.join()
 
             # 4. Run MACREL on current batch
-            macrel_scores = macrel_score_batch_src(sequences)
+            # Hemolysis is an attribute, never in the fitness unless
+            # --hemo-in-score. Measuring it every generation costs 57.7 s of an
+            # 88.6 s generation; --hemo-every N samples it instead.
+            _hemo_now = (gen_i % args.hemo_every == 0) or (gen_i + 1 == args.num_generations)
+            macrel_scores = macrel_score_batch_src(sequences, with_hemo=_hemo_now)
 
             if use_threads:
                 # 5a. GPU/MPS: overlap next fold with this scoring
@@ -625,7 +629,8 @@ def inter_fold_evolver(args, model, evolver, logheader, init_gen, device) -> Non
 
             # 4. Run MACREL on chain A only
             chain_a_seqs = [s.split(':')[0] for s in sequences]
-            macrel_scores = macrel_score_batch_src(chain_a_seqs)
+            _hemo_now = (gen_i % args.hemo_every == 0) or (gen_i + 1 == args.num_generations)
+            macrel_scores = macrel_score_batch_src(chain_a_seqs, with_hemo=_hemo_now)
 
             if use_threads:
                 # 5a. GPU/MPS: overlap next fold with this scoring
@@ -770,6 +775,20 @@ if __name__ == '__main__':
     #         help='',
     # )
     parser.add_argument(
+            '--hemo-every', type=int, default=1,
+            help='measure hemolysis every N generations instead of every one '
+                 '(default 1). HemoPI2 costs ~58 s per generation on the '
+                 'production node -- 65%% of a generation -- and never enters '
+                 'the fitness. Unmeasured generations log NaN, and a molecule '
+                 'first evaluated in one KEEPS NaN for as long as it survives, '
+                 'including into the final population: hemo_prob is a property '
+                 'of the sequence, cached with it, not re-measured. Recover the '
+                 'missing values post-hoc with analysis/score_posthoc.py, which '
+                 'scores HemoPI2 for the audited candidates and, with '
+                 '--lineage, along the whole ancestral line. Forced to 1 by '
+                 '--hemo-in-score; the final generation is always measured.',
+    )
+    parser.add_argument(
             '--num-recycles',
             type=int,
             default=1,
@@ -815,6 +834,16 @@ if __name__ == '__main__':
     )
 
     args = parser.parse_args()
+
+    # Sampling hemolysis is only safe while it is an attribute. If it is in the
+    # fitness, every generation needs a real value or the score silently
+    # becomes NaN for the unmeasured ones.
+    if args.hemo_in_score and args.hemo_every != 1:
+        print(f"  --hemo-in-score requires a hemolysis value every generation; "
+              f"overriding --hemo-every {args.hemo_every} -> 1")
+        args.hemo_every = 1
+    if args.hemo_every < 1:
+        parser.error("--hemo-every must be >= 1")
 
     # --start is a friendly front-end for -iseq: translate it into the initial_seq
     # string the seeding code understands. -iseq still works on its own.

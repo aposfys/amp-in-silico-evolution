@@ -302,7 +302,7 @@ def fig_divergence(traj, outdir):
         print("  posthoc_divergence: skipped, no AMPlify scores")
         return
     fig, ax = plt.subplots(figsize=(5.6, 3.4))
-    for name, arm, g, mac, amp in usable:
+    for name, arm, g, mac, amp, _hemo in usable:
         col = C.get(arm, C_INK)
         ax.plot(g, mac, lw=1.5, color=col, zorder=3)
         ax.plot(g, amp, lw=1.5, color=col, ls=(0, (4, 3)), zorder=3)
@@ -404,25 +404,27 @@ def main():
         lin_seqs = sorted(lin_seqs)
         print(f"  {len(per_run)} line(s), {len(lin_seqs)} unique sequences")
         if lin_seqs:
-            lmac, _ = macrel_hemo(lin_seqs)
+            lmac, lhemo = macrel_hemo(lin_seqs)
             lamp = amplify_scores(lin_seqs, args.model)
             nan = float("nan")
             for name, arm, pts in per_run:
                 g = [p[0] for p in pts]
                 traj.append((name, arm, g,
                              [lmac.get(p[1], nan) for p in pts],
-                             [lamp.get(p[1], nan) for p in pts]))
+                             [lamp.get(p[1], nan) for p in pts],
+                             [lhemo.get(p[1], nan) for p in pts]))
             with open(os.path.join(args.outdir, "posthoc_lineage.tsv"), "w") as fh:
-                fh.write("run\tgeneration\tmacrel\tamplify\tsequence\n")
-                for (name, _arm, pts), (_, _a2, g, m, a) in zip(per_run, traj):
-                    for (gen, sq), mv, av in zip(pts, m, a):
-                        fh.write(f"{name}\t{gen}\t{mv:.3f}\t{av:.3f}\t{sq}\n")
+                fh.write("run\tgeneration\tmacrel\tamplify\themopi2\tsequence\n")
+                for (name, _arm, pts), (_, _a2, g, m, a, h) in zip(per_run, traj):
+                    for (gen, sq), mv, av, hv in zip(pts, m, a, h):
+                        fh.write(f"{name}\t{gen}\t{mv:.3f}\t{av:.3f}\t"
+                                 f"{hv:.3f}\t{sq}\n")
             print("  posthoc_lineage.tsv")
             fig_divergence(traj, args.outdir)
 
             # Does the gap OPEN over the trajectory? That is the diagnostic,
             # not the gap's size at any single point.
-            for name, _arm, g, m, a in traj:
+            for name, _arm, g, m, a, _h in traj:
                 pair = [(gg, mm - aa) for gg, mm, aa in zip(g, m, a)
                         if mm == mm and aa == aa]
                 if len(pair) < 10:
