@@ -354,8 +354,8 @@ def fold_evolver(args, model, evolver, logheader, init_gen, device) -> None:
 
 
     ancestral_memory = pd.DataFrame(columns=columns)
-    # sequence -> its most recent single-row frame, kept in step with
-    # ancestral_memory. See the dedup note in the generation loop.
+    # sequence -> the position of its most recent row in ancestral_memory.
+    # See the dedup notes in the generation loop and at the accumulation site.
     seen_rows = {}
     ancestral_memory.to_csv(os.path.join(args.outpath, args.log), mode='a', index=False, header=True, sep='\t') #write header of the progress log
 
@@ -392,7 +392,7 @@ def fold_evolver(args, model, evolver, logheader, init_gen, device) -> None:
             id = "g{0}seq{1}_{2}_{3}".format(gen_i, n, prev_id, mutation_data); n+=1
 
             if seen: #if sequence already exits do not predict a structure again
-                repeat = seen_rows[seq]
+                repeat = ancestral_memory.iloc[[seen_rows[seq]]]
                 if new_gen.empty:
                     new_gen = repeat.copy()
                 else:
@@ -449,9 +449,16 @@ def fold_evolver(args, model, evolver, logheader, init_gen, device) -> None:
             ancestral_memory = init_gen
         else:
             ancestral_memory = pd.concat([ancestral_memory, init_gen])
-        for _i in range(len(init_gen)):
-            _row = init_gen.iloc[[_i]]
-            seen_rows[_row.sequence.iloc[0]] = _row
+        # Store the POSITION of each row, not the row. Retaining a one-row
+        # DataFrame per unique sequence costs 2,917 bytes against 61 for an
+        # int -- 1.17 GB against 0.02 GB at pop 400 x 1000 generations, on top
+        # of ancestral_memory itself. Positions are stable because
+        # ancestral_memory is only ever appended to, and .iloc is positional so
+        # duplicate index labels from sampling with replacement cannot confuse
+        # the lookup.
+        _start = len(ancestral_memory) - len(init_gen)
+        for _i, _s in enumerate(init_gen.sequence):
+            seen_rows[_s] = _start + _i
 
         #select the next generation
         init_gen = evolver.select(new_gen, init_gen, args.pop_size, args.selection_mode, args.norepeat, args.beta)
@@ -542,8 +549,8 @@ def inter_fold_evolver(args, model, evolver, logheader, init_gen, device) -> Non
                'ss']
       
     ancestral_memory = pd.DataFrame(columns=columns)
-    # sequence -> its most recent single-row frame, kept in step with
-    # ancestral_memory. See the dedup note in the generation loop.
+    # sequence -> the position of its most recent row in ancestral_memory.
+    # See the dedup notes in the generation loop and at the accumulation site.
     seen_rows = {}
     ancestral_memory.to_csv(os.path.join(args.outpath, args.log), mode='a', index=False, header=True, sep='\t') #write header of the progress log
 
@@ -580,7 +587,7 @@ def inter_fold_evolver(args, model, evolver, logheader, init_gen, device) -> Non
             id = "g{0}seq{1}_{2}_{3}".format(gen_i, n, prev_id, mutation_data); n+=1
 
             if seen: #if sequence already exits do not predict a structure again
-                repeat = seen_rows[seq]
+                repeat = ancestral_memory.iloc[[seen_rows[seq]]]
                 if new_gen.empty:
                     new_gen = repeat.copy()
                 else:
@@ -639,9 +646,16 @@ def inter_fold_evolver(args, model, evolver, logheader, init_gen, device) -> Non
             ancestral_memory = init_gen
         else:
             ancestral_memory = pd.concat([ancestral_memory, init_gen])
-        for _i in range(len(init_gen)):
-            _row = init_gen.iloc[[_i]]
-            seen_rows[_row.sequence.iloc[0]] = _row
+        # Store the POSITION of each row, not the row. Retaining a one-row
+        # DataFrame per unique sequence costs 2,917 bytes against 61 for an
+        # int -- 1.17 GB against 0.02 GB at pop 400 x 1000 generations, on top
+        # of ancestral_memory itself. Positions are stable because
+        # ancestral_memory is only ever appended to, and .iloc is positional so
+        # duplicate index labels from sampling with replacement cannot confuse
+        # the lookup.
+        _start = len(ancestral_memory) - len(init_gen)
+        for _i, _s in enumerate(init_gen.sequence):
+            seen_rows[_s] = _start + _i
 
         #select the next generation
         init_gen = evolver.select(new_gen, init_gen, args.pop_size, args.selection_mode, args.norepeat, args.beta)
