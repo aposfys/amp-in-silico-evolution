@@ -7,7 +7,7 @@ emits. No structural penalties, no secondary structure, no activity classifier.
 score = mean_pLDDT × pTM
 ```
 
-Paired against [`fitness-pfes-macrel`](../../tree/fitness-pfes-macrel), which is
+Paired against [`main`](../../tree/main), the production arm, which is
 this plus the full PFES structural objective and MACREL, it isolates what all of
 that machinery actually contributes. Run it with the same `--start-file` as the
 production branch and the difference is attributable to the objective alone.
@@ -69,4 +69,4 @@ matching score scale makes the comparison meaningless.
 
 Install, starting populations, analysis and the post-hoc AMPlify audit are
 identical to the production branch — see
-[`fitness-pfes-macrel`](../../tree/fitness-pfes-macrel).
+[`main`](../../tree/main).
