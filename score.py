@@ -111,7 +111,13 @@ def get_nconts(pdb_txt, chain="A", distance_cutoff=6.0, plddt_cutoff=0):
 
     The |i - j| > 5 rule is what makes this a measure of TERTIARY compactness:
     it excludes the i -> i+4 alpha-helical register, so a long helix does not
-    score as a compact fold. Upstream PFES loops `range(i + 4, n_atoms)`, which
+    score as a compact fold. That distinction matters biologically as well as
+    arithmetically for this fork's target class: membrane-active antimicrobial
+    peptides are disordered in aqueous solution and fold to an amphipathic helix
+    only on contact with a lipid bilayer (Cardoso et al. 2021, Biophys Rev 13,
+    35-69; Zhang et al. 2021, Mil Med Res 8, 48), so they never occupy the
+    compact state this term scores. Expect ~1.0 for a 25-30 aa helix; that is
+    correct, not a regression. Upstream PFES loops `range(i + 4, n_atoms)`, which
     admits |i - j| = 4 and 5 and therefore counts exactly those helical
     contacts; at its 6 A cutoff the geometry mostly masks the error (Ca(i)-
     Ca(i+4) is ~6.2 A in an ideal helix), but at a wider cutoff it dominates
