@@ -71,12 +71,19 @@ python - <<'PY' 2>/dev/null | sed 's/^/  /'
 try:
     import torch
     if torch.cuda.is_available():
-        gb = torch.cuda.get_device_properties(0).total_memory/1e9
+        total = torch.cuda.get_device_properties(0).total_memory/1e9
+        free = torch.cuda.mem_get_info()[0]/1e9      # what is ACTUALLY available
+        used = total - free
+        print(f"total {total:.1f} GB, in use {used:.1f} GB, FREE {free:.1f} GB")
+        if used > 1.0:
+            print(f"*** {used:.1f} GB is already allocated by another process. Size the")
+            print("    batch against FREE memory, or wait for that job to finish.")
         # ESM3-open 1.4B is ~5.6 GB in fp32; the rest is activations, which
-        # scale with tokens in the batch. Conservative: ~1024 tokens per free GB.
-        rec = int(max(2048, (gb - 7) * 1024))
-        print(f"{gb:.0f} GB VRAM -> try --max-tokens-per-batch {rec}")
-        print(f"(current default is 512; the CPU runs used 4096)")
+        # scale with tokens in the batch. Conservative: ~1024 tokens per spare GB
+        # after the model, with 2 GB of headroom.
+        rec = int(max(1024, (free - 5.6 - 2.0) * 1024))
+        print(f"-> try --max-tokens-per-batch {rec}")
+        print("(current default is 512; the CPU runs used 4096)")
         print("Raise it until you OOM, then halve. A whole pop-400 generation of")
         print("30-mers is ~12,000 tokens, so one batch per generation is the goal.")
     else:
