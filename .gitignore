@@ -433,6 +433,9 @@ comparison_plots_300/
 smprot_raw/
 smprot_raw/
 
+# Intermediate structures: 60,000 PDB per run, re-derivable from progress.log
+production/**/structures/
+
 # ---------------------------------------------------------------------------
 # Local run scratch. pfes-results/ is ~3.1 GB of run outputs (gzipped PDBs per
 # candidate per generation) and pfes-runs/ holds the per-run tar archives. Both
