@@ -50,7 +50,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)                      # compare_runs.py, alongside
 sys.path.insert(0, os.path.dirname(_HERE))     # score.py, at the repo root
 from compare_runs import (load_run, gen_of, fnum, global_best, lineage,  # noqa: E402
-                          longest_helix, C, LABEL, style, save)
+                          longest_helix, C, C_INK, LABEL, style, save)
 
 # Net charge at pH 7.4. Histidine is counted at +0.1, its approximate
 # protonated fraction at that pH; this reproduces the +5.2 reported for the
@@ -288,25 +288,33 @@ def fig_divergence(traj, outdir):
     agreeing, and that is the more diagnostic question: MACREL drives
     selection, so if the search is exploiting MACREL-specific artefacts rather
     than finding real antimicrobial character, the signature is AMPlify
-    tracking MACREL early and flattening or falling while MACREL keeps
-    climbing. A gap that is present from generation zero means the two models
-    simply disagree about this sequence family; a gap that OPENS over the
-    trajectory is evidence of specification gaming.
+    tracking MACREL early and then flattening while MACREL keeps climbing. A
+    gap present from generation zero means the two models simply disagree about
+    this sequence family; a gap that OPENS over the trajectory is evidence of
+    specification gaming.
     """
-    if not traj:
+    # traj entries are (name, arm, generations, macrel, amplify) -- index 4 is
+    # AMPlify. Checking index 3 would test MACREL, which is always present, and
+    # the figure would be drawn empty.
+    usable = [t for t in traj
+              if any(v == v for v in t[4])]        # at least one AMPlify score
+    if not usable:
+        print("  posthoc_divergence: skipped, no AMPlify scores")
         return
-    fig, ax = plt.subplots(figsize=(5.4, 3.4))
-    for name, g, mac, amp in traj:
-        st = style(name) if callable(style) else {}
-        ax.plot(g, mac, lw=1.4, **st)
-        ax.plot(g, amp, lw=1.4, ls="--", **st)
-    ax.set_xlabel("generation")
-    ax.set_ylabel("P(antimicrobial)")
+    fig, ax = plt.subplots(figsize=(5.6, 3.4))
+    for name, arm, g, mac, amp in usable:
+        col = C.get(arm, C_INK)
+        ax.plot(g, mac, lw=1.5, color=col, zorder=3)
+        ax.plot(g, amp, lw=1.5, color=col, ls=(0, (4, 3)), zorder=3)
     ax.set_ylim(-0.02, 1.05)
-    ax.legend(handles=[Line2D([], [], color="0.35", lw=1.4, label="MACREL (drives selection)"),
-                       Line2D([], [], color="0.35", lw=1.4, ls="--", label="AMPlify (independent)")],
-              fontsize=7, frameon=False, loc="lower right")
-    ax.set_title("Classifier agreement along the ancestral line", fontsize=9)
+    style(ax, "generation", "P(antimicrobial)")
+    fig.legend(handles=[Line2D([], [], color=C_INK, lw=1.5,
+                               label="MACREL (drove selection)"),
+                        Line2D([], [], color=C_INK, lw=1.5, ls=(0, (4, 3)),
+                               label="AMPlify (independent)")],
+               loc="lower center", ncol=2, frameon=False, fontsize=8.5,
+               bbox_to_anchor=(0.5, -0.02))
+    fig.subplots_adjust(bottom=0.26, left=0.13)
     save(fig, outdir, "posthoc_divergence")
 
 
@@ -391,7 +399,7 @@ def main():
                    if r.get("sequence")]
             if not pts:
                 continue
-            per_run.append((run["name"], pts))
+            per_run.append((run["name"], run["arm"], pts))
             lin_seqs.update(s for _, s in pts)
         lin_seqs = sorted(lin_seqs)
         print(f"  {len(per_run)} line(s), {len(lin_seqs)} unique sequences")
@@ -399,14 +407,14 @@ def main():
             lmac, _ = macrel_hemo(lin_seqs)
             lamp = amplify_scores(lin_seqs, args.model)
             nan = float("nan")
-            for name, pts in per_run:
+            for name, arm, pts in per_run:
                 g = [p[0] for p in pts]
-                traj.append((name, g,
+                traj.append((name, arm, g,
                              [lmac.get(p[1], nan) for p in pts],
                              [lamp.get(p[1], nan) for p in pts]))
             with open(os.path.join(args.outdir, "posthoc_lineage.tsv"), "w") as fh:
                 fh.write("run\tgeneration\tmacrel\tamplify\tsequence\n")
-                for (name, pts), (_, g, m, a) in zip(per_run, traj):
+                for (name, _arm, pts), (_, _a2, g, m, a) in zip(per_run, traj):
                     for (gen, sq), mv, av in zip(pts, m, a):
                         fh.write(f"{name}\t{gen}\t{mv:.3f}\t{av:.3f}\t{sq}\n")
             print("  posthoc_lineage.tsv")
@@ -414,7 +422,7 @@ def main():
 
             # Does the gap OPEN over the trajectory? That is the diagnostic,
             # not the gap's size at any single point.
-            for name, g, m, a in traj:
+            for name, _arm, g, m, a in traj:
                 pair = [(gg, mm - aa) for gg, mm, aa in zip(g, m, a)
                         if mm == mm and aa == aa]
                 if len(pair) < 10:
