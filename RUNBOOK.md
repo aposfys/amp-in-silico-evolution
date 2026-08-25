@@ -61,11 +61,44 @@ The estimates above were replaced by direct measurement. One was badly wrong.
 |---|---|---|
 | `pypsique` | **7.8 ms / structure** | ~215 ms — **off by 27×** |
 | HemoPI2 | **57.7 s / generation** | ~60 s ✓ |
-| MACREL | contaminated probe¹ | 350 ms (on a laptop) |
+| MACREL subprocess | **973 ms / generation** | 350 ms (laptop) |
+| MACREL in-process | **15.2 ms / generation** | — (**64×**, saves ~1 s/gen) |
 
-¹ `macrel_score_batch_src` calls `hemopi2_score_batch` internally, so timing it
-measures both. Use `score._macrel_subprocess` against `score._macrel_inproc()`
-for a clean comparison.
+`preflight.sh` on the production node confirms `macrel path: in-process (fast)`
+after the magainin-2 probe, so the fast path is live and validated there.
+
+### Cost is mostly FIXED, which argues for a large population
+
+Two points from the same node — pop 8 at ~62 s/generation, pop 100 at 88.6 s —
+decompose as **~60 s fixed plus ~0.29 s per candidate**. HemoPI2 accounts for
+~97 % of the fixed part. Treat this as indicative rather than settled: the two
+runs used different `--threads`, and it needs confirming with a proper sweep.
+
+| pop | s / generation | ms per candidate |
+|---|---|---|
+| 8 | 62.0 | 7,750 |
+| 100 | 88.6 | 886 |
+| 400 | 175 (projected) | 438 |
+
+**A larger population is genuinely cheaper per candidate**, because the fixed
+cost amortises: pop 400 evaluates 4× the candidates of pop 100 for roughly 2×
+the wall time. That is the real argument for raising it, not the GPU.
+
+### The unexplained 0.22 s per candidate
+
+Of the ~0.29 s per candidate, folding is 0.058 s, `pypsique` 0.008 s and
+in-process MACREL 0.0001 s. **~0.22 s is unaccounted for** — at pop 400 that is
+89 s of every generation, 25 h per 1000-generation run, and after HemoPI2 is
+sampled it becomes the largest single term. Profile it before committing six
+runs:
+
+```bash
+python -c "
+import cProfile,pstats,sys; sys.path.insert(0,'.')
+sys.argv='pfes.py --start file --start-file init/init_random.faa -ps 8 -ng 2 --norepeat --hemo-every 99 -o /tmp/prof'.split()
+cProfile.run(open('pfes.py').read(),'/tmp/prof.out')
+pstats.Stats('/tmp/prof.out').sort_stats('cumulative').print_stats(25)"
+```
 
 **There is no psique problem.** At 7.8 ms it is 0.78 s of a generation at
 pop 100 — under 1 %. The ~215 ms figure came from attributing everything
