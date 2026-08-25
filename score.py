@@ -694,7 +694,7 @@ def _macrel_key(s):
     return s
 
 
-def macrel_score_batch_src(sequences):
+def macrel_score_batch_src(sequences, with_hemo=True):
     """
     As macrel_score_batch, but returns 3-tuples
     {sequence: (amp_probability, hemolytic_probability, source)} where
@@ -721,7 +721,15 @@ def macrel_score_batch_src(sequences):
     if not sequences:
         return {}
     # Hemolytic probability for the whole batch (one HemoPI2 call).
-    hemo_scores = hemopi2_score_batch(sequences)
+    #
+    # with_hemo=False skips it entirely and records NaN. HemoPI2 is measured at
+    # 57.7 s per generation on the production node, 65% of an 88.6 s generation,
+    # for a column that never enters the fitness -- 16 h of a 1000-generation
+    # run. NaN rather than 0.0 because 0.0 is a valid hemolysis probability and
+    # cannot mark "not measured"; PFES_SKIP_HEMO keeps writing 0.0 for
+    # compatibility with the existing series.
+    hemo_scores = (hemopi2_score_batch(sequences) if with_hemo
+                   else {seq: float('nan') for seq in sequences})
 
     # Fast path: model loaded once per process rather than once per generation.
     # Used only after it has been shown to reproduce the subprocess on a known
@@ -841,7 +849,7 @@ def macrel_score_batch_src(sequences):
         return fallback
 
 
-def macrel_score_batch(sequences):
+def macrel_score_batch(sequences, with_hemo=True):
     """
     Backward-compatible view of macrel_score_batch_src: returns
     {sequence: (amp_probability, hemolytic_probability)}, dropping the scorer
@@ -849,4 +857,5 @@ def macrel_score_batch(sequences):
     New code that cares which scorer answered should call
     macrel_score_batch_src directly.
     """
-    return {k: (v[0], v[1]) for k, v in macrel_score_batch_src(sequences).items()}
+    return {k: (v[0], v[1])
+            for k, v in macrel_score_batch_src(sequences, with_hemo).items()}
