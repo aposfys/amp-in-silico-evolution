@@ -33,6 +33,15 @@ score = pLDDT × pTM × length_penalty × helix_penalty × beta_penalty
 | hemo_prob | HemoPI2 | 0–1 | **no** — logged; `--hemo-in-score` to enable |
 | AMPlify probability | AMPlify | 0–1 | **no** — post-hoc only, never in the loop |
 
+Hemolysis is measured but never selected on. It is measured at all because it
+is half of what separates an antimicrobial peptide from a detergent: an ideal
+candidate has *"high therapeutic activity and minimum hemolytic activity"*
+([Chaudhary 2016][c16]), the therapeutic index being the ratio of minimum
+haemolytic to minimum inhibitory concentration ([Cardoso 2021][c21]). It is not
+selected on because optimising a predictor makes its output a restatement of the
+objective rather than evidence about the design — the same reason AMPlify audits
+post-hoc rather than driving the search.
+
 ## Where to look
 
 Two arms, run from identical starting populations so the difference between them
@@ -67,7 +76,22 @@ contacts were |i − j| = 4** — the term was counting helical turns. Corrected
 A single α-helix has no tertiary contacts, so the corrected term sits near
 **1.0** for 25–30 aa peptides and rises only for genuinely globular ones
 (measured: 1.01 for a 26-mer helix, 1.08 for a 38-mer). That is the right
-answer, not a regression.
+answer, not a regression — and the reason is biological, not arithmetic.
+Contact density measures *tertiary packing*, the defining property of the
+globular domains PFES was built to evolve. Membrane-active AMPs never occupy
+that state: they are disordered in aqueous solution and fold to an amphipathic
+helix only on contact with a lipid bilayer ([Cardoso 2021][c21],
+[Zhang 2021][z21]). A compactness term asks this class for a property it should
+not have.
+
+**No amphipathicity term replaces it, deliberately.** Hydrophobic moment and net
+charge are what separate active from inactive peptides at scale
+([Wang 2017][w17]) — but MACREL already carries the hydrophobic moment among its
+features, so an explicit term would weight one descriptor twice and hand the
+optimiser a single scalar to game. It is also unnecessary: measured with
+MACREL's own implementation the winners average **μH 0.826** against **0.780**
+for magainin 2, melittin, LL-37, pexiganan and cecropin B, at net charges of +4
+to +8 — inside the +2 to +9 reported for the class ([Zhang 2021][z21]).
 
 > **Open:** the correction lowers scores by roughly 0.6×, and Boltzmann
 > selection depends on `β(sᵢ − s_max)`, so pressure scales with score spread. β
@@ -151,3 +175,40 @@ Repeat runs are independent samples of the same process — which is what makes
 replication meaningful — but an individual trajectory cannot be regenerated and
 must be preserved from its log and `structures/`. The starting population is the
 one thing that is fixed, and it is fixed by a file, not a seed.
+
+## References
+
+[c21]: https://doi.org/10.1007/s12551-021-00784-y
+[z21]: https://doi.org/10.1186/s40779-021-00343-2
+[w17]: https://doi.org/10.3390/molecules22112037
+[c16]: https://doi.org/10.1038/srep22843
+
+- **Sahakyan H., Babajanyan S. G., Wolf Y. I. & Koonin E. V. (2025).** In silico
+  evolution of globular protein folds from random sequences. *PNAS* **122**,
+  e2509015122. — the objective, Eqs. 4–8, and the contact definition this fork
+  restores.
+- **Hayes T. et al. (2025).** Simulating 500 million years of evolution with a
+  language model. *Science* **387**, 850–858. — ESM3; Table S9 is the
+  structure-prediction benchmark quoted above.
+- **Santos-Júnior C. D., Pan S., Zhao X.-M. & Coelho L. P. (2020).** Macrel:
+  antimicrobial peptide screening in genomes and metagenomes. *PeerJ* **8**,
+  e10555. — the activity classifier, its 22 features, and its 10–100 residue
+  domain.
+- **Li C. et al. (2022).** AMPlify: attentive deep learning model for discovery
+  of novel antimicrobial peptides effective against WHO priority pathogens.
+  *BMC Genomics* **23**, 77. — the architecturally unrelated post-hoc auditor.
+- **[Cardoso P. et al. (2021)][c21].** Molecular engineering of antimicrobial
+  peptides. *Biophys Rev* **13**, 35–69. — AMPs disordered in water, helical
+  only on the membrane; the therapeutic index.
+- **[Zhang Q.-Y. et al. (2021)][z21].** Antimicrobial peptides: mechanism of
+  action, activity and clinical potential. *Mil Med Res* **8**, 48. — the same
+  conformational point, and the <40 aa / +2 to +9 range behind `-pl0`.
+- **[Wang C.-K., Shih L.-Y. & Chang K. Y. (2017)][w17].** Large-scale analysis of
+  antimicrobial activities in relation to amphipathicity and charge.
+  *Molecules* **22**, 2037. — why amphipathicity is the property that matters.
+- **[Chaudhary K. et al. (2016)][c16].** A web server and mobile app for
+  computing hemolytic potency of peptides. *Sci Rep* **6**, 22843. — HemoPI;
+  why a hemolysis readout is kept at all.
+- **Yang J. et al. (2020).** Improved protein structure prediction using
+  predicted interresidue orientations. *PNAS* **117**, 1496–1503. — the
+  virtual-Cβ construction used where ESM3 emits backbone only.
