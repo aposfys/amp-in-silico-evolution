@@ -52,22 +52,43 @@ without accepting it, and its terms may be narrower than this repository's MIT
 licence — if you intend any use beyond research, read the gate text rather than
 inferring permission from this file.
 
-## Upstream
+## Upstream: PFES, and what the MIT licence here does and does not claim
 
 This project is a fork of [PFES](https://github.com/sahakyanhk/pfes) by Harutyun
-Sahakyan, Sofya Babajanyan, Yuri Wolf and Eugene Koonin, released into the
-public domain under the Unlicense. The Unlicense imposes no conditions on
-derivative works, so this fork is MIT licensed; the upstream code remains public
-domain regardless.
+Sahakyan, Sofya Babajanyan, Yuri Wolf and Eugene Koonin, released by its authors
+into the public domain under the Unlicense — still its licence at the time of
+writing, with no additional conditions stated in its README.
 
 > Sahakyan H., Babajanyan S. G., Wolf Y. I. & Koonin E. V. (2025). In silico
 > evolution of globular protein folds from random sequences. *PNAS* **122**,
 > e2509015122. [doi:10.1073/pnas.2509015122](https://doi.org/10.1073/pnas.2509015122)
 
-The objective, its parameterisation, the audit against the published equations,
-the starting-population construction and the analysis in this repository are
-original work. What is inherited and what is not is recorded per-term in
-[`OBJECTIVE.md`](OBJECTIVE.md).
+The Unlicense places no conditions on derivative works, so this fork may carry
+any licence, and carries MIT. **Three things follow, and the copyright line in
+`LICENSE` should be read against all of them.**
+
+**The upstream code is public domain and stays public domain.** Nothing here
+withdraws it. Anyone may take PFES from its own repository under the Unlicense,
+and the MIT licence on this repository has no bearing on that.
+
+**The MIT copyright claim is over this project's contributions**, not over the
+upstream work it builds on. Seven files are forked from PFES and still carry
+substantial upstream code — `pfes.py`, `score.py`, `evolution.py`,
+`visual_pfes.py`, `psique.py`, `pymol_vstraj.py`, `bin/dssp.sh`. Across the
+core simulator files the commit history is 65 commits by Harutyun Sahakyan
+against 59 by Apostolos Fysekidis. Those files are derivative works: the
+modifications are this project's, the material they modify is nobody's.
+
+**Everything else in the repository is original**, including the objective and
+its parameterisation, `preflight.sh` and the guards, `analysis/` in its
+entirety, the starting-population construction, and the documentation. Which
+terms of the objective are inherited and which are not is recorded per-term in
+[`OBJECTIVE.md`](OBJECTIVE.md); which files are forked and which are not is the
+list above.
+
+If you want the unencumbered version, take PFES from upstream. If you want this
+fork's objective, audit, starting populations or analysis, MIT applies and
+attribution is the only condition.
 
 ## Data
 

@@ -298,11 +298,20 @@ one thing that is fixed, and it is fixed by a file, not a seed.
 
 ## Licence
 
-MIT ([`LICENSE`](LICENSE)) for the work in this repository. The bundled
-`psique` binary is MIT by Francisco Adasme and carries its own notice at
-[`bin/LICENSE.psique`](bin/LICENSE.psique); the ESM3 weights are gated and
-governed by the terms you accept on HuggingFace, not by this licence. Every
-third-party component is listed in [`NOTICE.md`](NOTICE.md).
+MIT ([`LICENSE`](LICENSE)) for this project's contributions. Attribution is the
+only condition.
+
+It is a fork, so the claim is bounded. Upstream [PFES](https://github.com/sahakyanhk/pfes)
+is public domain under the Unlicense, which places no conditions on derivative
+works — seven files here still carry substantial upstream code and remain
+derivative works of public-domain material, and PFES itself can always be taken
+from upstream unencumbered. The bundled `psique` binary is MIT by Francisco
+Adasme and carries its own notice at [`bin/LICENSE.psique`](bin/LICENSE.psique),
+as MIT requires. The ESM3 weights are gated and governed by the terms you accept
+on HuggingFace, not by this licence.
+
+[`NOTICE.md`](NOTICE.md) has the full breakdown: what is forked, what is
+original, and every component the pipeline bundles or fetches.
 
 This repository previously carried the Unlicense, inherited from upstream PFES
 when it was forked. That was never a deliberate choice here, and it made two
