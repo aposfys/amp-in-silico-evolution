@@ -59,6 +59,111 @@ Both arms compute and log every quantity either one selects on, so their
 
 [`production/`](production/) holds the design study the thesis reports: the
 starting populations, the launch scripts, and one compressed archive per run.
+**Read [`production/README.md`](production/README.md) before using any of it** —
+four of the twelve archives came from a series that ran without MACREL.
+
+## The experiment
+
+Three starting populations × two objectives, from identical seeds. Six runs.
+
+| | `main` — structure × MACREL | `fitness-esm3` — pLDDT × pTM |
+|---|---|---|
+| random | `v4/main/random` | `v4/ctrl/random` |
+| fragments | `v4/main/fragments` | `v4/ctrl/fragments` |
+| sORF | `v4/main/orfs` | `v4/ctrl/orfs` |
+
+It is an **ablation**, and it works because `amp_prob` is computed on both arms
+but selects on only one. On `main`, MACREL climbing from 0.26 to 0.98 proves
+nothing — it restates what was optimised. On `fitness-esm3` the same column is a
+*held-out measurement*, and the difference between the two curves is the causal
+contribution of everything this fork adds to PFES. Until now those terms were
+justified by code audit and exploratory observation, never by a controlled
+contrast.
+
+Three things it decides:
+
+**Necessity.** If the control also drifts to `amp_prob` ≈ 0.9, the classifier and
+the structural terms were decoration and ESM3 fold confidence alone designs
+antimicrobial peptides. If it stays flat or falls, the composite objective is
+what puts the search on AMPs.
+
+**The failure mode, shown rather than argued.** The control is not a null arm.
+`pLDDT × pTM` is a reasonable objective — it is close to what Sahakyan et al.
+published, and what they published it *for* was globular folds from random
+sequence. Optimised alone it should produce the wrong molecule class: chains grow
+without a length penalty, because fold confidence rises with length. Same
+optimiser, same operators, same seeds, and only the objective decides whether the
+run returns a protein or a peptide.
+
+**Origin × objective.** §4.3.1 of the thesis explains the origin effect by *room
+to move*: the length term holds chains near 27 residues, where a seed's
+composition is most of the composition it can ever have. The control has no
+length penalty at all, so it is the extreme of that condition, and the mechanism
+predicts the origin effect must vanish there. If it persists, the mechanism is
+wrong.
+
+| readout | `main` | control (held out) | if it comes out otherwise |
+|---|---|---|---|
+| chain length | ~26–28 aa | grows past 100 aa | control staying short ⇒ the length penalty is redundant |
+| `amp_prob` | 0.26 → 0.98 (selected) | low / falling | control reaching ~0.9 ⇒ the objective was unnecessary |
+| net charge | +6 to +7 | near background | — |
+| hemolysis (held out on both) | — | — | a *safer* control ⇒ the objective costs safety |
+| origin effect | present | absent | present ⇒ §4.3.1's mechanism is falsified |
+
+### The three origins are matched where it matters
+
+Measured with `score_posthoc.py`'s own `net_charge` and `hydrophobic_fraction`,
+so the starting and final numbers are computed the same way:
+
+| arm | n | unique | len | net charge | sd | hydrophobic | sd |
+|---|---|---|---|---|---|---|---|
+| random | 100 | 100 | 25 | +0.13 | 2.03 | 0.464 | 0.093 |
+| fragments | 100 | 100 | 25 | −0.11 | 2.38 | 0.398 | 0.093 |
+| sORF | 100 | 100 | 25 | +0.57 | 2.90 | 0.381 | 0.120 |
+
+The spread *between* arms (0.68 in charge, 0.083 in hydrophobic fraction) is
+smaller than the spread *within* any one of them. The origins are therefore
+indistinguishable in the bulk composition the objective rewards, and differ only
+in where the sequence came from — which is the whole premise of the comparison.
+All three are screened at `--max-amp-prob 0.5`; see [`init/README.md`](init/README.md).
+
+### One replicate per cell, deliberately
+
+Six runs is one replicate per cell, and that is enough for the ablation: the
+origins act as blocks, giving three independent runs per arm, against effects
+(27 aa versus 100+ aa) far larger than run-to-run noise. It is **not** enough for
+the origin × objective interaction, which is a difference of differences against
+a replicate spread of 0.037–0.135 in mean score in the unregularised regime.
+
+Replicate where there is no variance estimate. The regularised arm has one
+already — v3 replicates agree to 0.002–0.022. The control arm has none. So run
+the six, read the scatter across the three control runs, and add a second
+replicate to the control only if they disagree. That reaches the right design by
+measurement instead of by guessing.
+
+### Reading it
+
+The control's chains grow past 100 aa, where MACREL is undefined and
+`macrel_score_batch` substitutes the `calculate_samp` surrogate per sequence —
+the primary readout changes identity mid-run. **Filter every analysis on
+`amp_src == 'macrel'`**, and report the generation at which each control run
+leaves the window; that generation is itself a result.
+
+### Why this design
+
+Optimising a learned predictor drives the search to where the predictor is
+unreliable — [Brookes, Park & Listgarten (ICML 2019)](https://proceedings.mlr.press/v97/brookes19a.html)
+state it directly, and their example failure is sequences that will not fold,
+which is the pathology the pLDDT × pTM terms exist to block. Classifier guidance
+is also known to narrow generated peptide diversity
+([Brief Bioinform 2025](https://academic.oup.com/bib/article/26/5/bbaf500/8301249)),
+which is why AMPlify and HemoPI2 audit rather than drive. The auditor split
+follows [Das et al. (Nat Biomed Eng 2021)](https://www.nature.com/articles/s41551-021-00689-x),
+who generate under classifier guidance and screen with filters the generator
+never saw. And the origin factor has a wet-lab analogue in
+[Salverda et al. (PLoS Genet 2011)](https://journals.plos.org/plosgenetics/article?id=10.1371%2Fjournal.pgen.1001321),
+where replicate in vitro lines of TEM-1 β-lactamase diverge because trajectories
+are contingent on the first substitution.
 
 ## Contact density measures compactness, not helicity
 
