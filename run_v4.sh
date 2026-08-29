@@ -54,6 +54,27 @@ if ! git diff --quiet HEAD -- pfes.py score.py; then
 fi
 echo "arm $ARM  branch $BRANCH  commit $(git rev-parse --short HEAD)"
 
+# Guard: the right environment, not merely a working one.
+#
+# preflight.sh catches an environment with no classifiers. It cannot catch one
+# that belongs to a different project and happens to import esm -- and this
+# pipeline has now been launched twice from `deeppeptide`, whose onnxruntime is
+# not pinned and whose torch is shared with the other half of the thesis.
+# Override with PFES_ENV if the environment is named something else.
+WANT_ENV="${PFES_ENV:-pfes_amps}"
+if [ -z "${CONDA_PREFIX:-}" ]; then
+    die_env="no conda environment is active"
+elif [ "$(basename "$CONDA_PREFIX")" != "$WANT_ENV" ]; then
+    die_env="active environment is '$(basename "$CONDA_PREFIX")', expected '$WANT_ENV'"
+fi
+if [ -n "${die_env:-}" ]; then
+    echo "ABORT: $die_env" >&2
+    echo "       conda activate $WANT_ENV      (build it with ./setup_gpu.sh $WANT_ENV)" >&2
+    echo "       or set PFES_ENV=<name> if you meant a different one." >&2
+    exit 1
+fi
+echo "env $(basename "$CONDA_PREFIX")  python $(command -v python)"
+
 # --------------------------------------------------------------------------- #
 # Shared host. Rucker has 32 cores and one GPU and is not exclusively ours.
 # Folding is on the GPU; PSIQUE, MACREL and HemoPI2 stay on the CPU, and thread
