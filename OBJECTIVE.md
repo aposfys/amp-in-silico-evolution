@@ -1,22 +1,52 @@
 # The objective, term by term
 
 Every term in the fitness, what it is for, where its constants come from, and
-how much selection pressure it actually applies. The last column is the point:
-four of the seven terms turn out to be inert at this chain length, the largest
-one is a metric used outside its published domain of validity, and the term the
-project exists to optimise is third.
+how much selection pressure it actually applies. Four of the seven terms turn
+out to be inert at this chain length; the activity classifier does its work in
+the first ten generations and then saturates; and for the remaining 590 the
+strongest voice in the objective is a metric used outside its published domain
+of validity.
 
-Measured on `sorf-r1` and `sorf-r2`, the only two production runs that ran with
-MACREL and HemoPI2 genuinely installed (see
-[`production/README.md`](production/README.md)). Spread is
-log₁₀(max/min) across the 100 members of the final generation — a pure number
-comparable across terms, because the fitness is a product.
+Measured on `sorf-r1` and `sorf-r2`, the only two runs of the previous series
+that had MACREL and HemoPI2 genuinely installed. Those runs have since been
+deleted along with the rest ([`VOID-RUNS.md`](VOID-RUNS.md)); they are
+recoverable from git history at `0942520`, and the numbers below are what they
+measured. Spread is log₁₀(max/min) across the 100 members of a generation — a
+pure number comparable across terms, because the fitness is a product, so
+`log(score) = Σ log(terms)` and these are additive contributions to the quantity
+selection ranks on.
+
+**The ordering changes over a run, and the table below is the endpoint.** The
+term that dominates depends on when you look:
+
+| gen | pTM | `P_L` | **MACREL** | contacts | pLDDT | mean `amp_prob` |
+|---|---|---|---|---|---|---|
+| 0 | 0.938 | 0.295 | **1.473** | 0.378 | 0.362 | 0.256 |
+| 10 | 0.459 | 0.246 | **0.296** | 0.156 | 0.098 | 0.607 |
+| 50 | 0.158 | 0.055 | **0.137** | 0.066 | 0.041 | 0.892 |
+| 200 | 0.220 | 0.114 | **0.108** | 0.063 | 0.037 | 0.934 |
+| 450 | 0.115 | 0.042 | **0.101** | 0.079 | 0.023 | 0.944 |
+| 599 | 0.069 | 0.042 | **0.036** | 0.050 | 0.004 | 0.971 |
+
+MACREL dominates generation 0 overwhelmingly — 1.47 against pTM's 0.94 — and is
+what drags a random population into AMP space, lifting mean `amp_prob` from
+0.256 to 0.607 within ten generations and to 0.918 by generation 100. Then it
+saturates. **From generation 10 onward pTM is the largest single term for the
+remaining 590 generations**, comparable to MACREL through the mid-run and ahead
+of it at the end.
+
+This does not mean the peptides are not antimicrobial; they are, at 0.92–0.97
+from generation 100. It means that what selects *among* AMP-like candidates for
+98 % of the run is a superposition score whose tolerance at this chain length is
+0.96 Å — below the coordinate error of any single-sequence predictor. Two
+candidates both at `amp_prob` 0.95 are separated because one has pTM 0.58 and
+the other 0.55, and at 26 residues that is not a fold-quality difference.
 
 | Term | Constants | Published? | log₁₀ spread | Status |
 |---|---|---|---|---|
 | **pTM** | — | Eq. 4 | **0.069 / 0.050** | **largest pressure — outside its domain** |
 | **length penalty** `P_L` | `L0=30, C=0.12` | **changed** from `250, 0.2` | 0.042 / 0.044 | binding, and justified below |
-| **MACREL** `amp_prob` | — | added by this fork | 0.036 / 0.022 | the design objective, **third** |
+| **MACREL** `amp_prob` | — | added by this fork | 0.036 / 0.022 | dominant at gen 0 (1.47), saturated by gen 100 |
 | helix penalty `P_α` | `L0=30, C=0.5` | Eq. 7, unchanged | 0.009 / 0.022 | inert — `P_L` binds first |
 | contact density | Cβ, 6 Å, \|i−j\|>5 | Eq. 5, restored | 0.007 | near-inert by construction |
 | pLDDT | — | Eq. 4 | 0.004 | saturated at 0.990 |
@@ -48,12 +78,12 @@ below 19** — the metric is undefined there, and this objective operates 14
 residues below the first boundary and 7 above the second
 ([Dunbrack 2025](https://www.biorxiv.org/content/10.1101/2025.02.10.637595v2)).
 
-This is why the winners sit at pTM 0.55–0.60 and why `ANALYSIS.md` had to
-explain that as "normal and acceptable for short peptides". It is neither
-normal nor a fold-quality statement: it is what a global superposition score
-returns when its tolerance is smaller than the coordinate error of any
-predictor. And because the term still *varies* (sd 0.010–0.015), that variation
-is the single strongest thing selection sees — roughly twice the MACREL term.
+This is why the winners sit at pTM 0.55–0.60, a figure the now-deleted
+`ANALYSIS.md` explained away as "normal and acceptable for short peptides". It
+is neither normal nor a fold-quality statement: it is what a global
+superposition score returns when its tolerance is smaller than the coordinate
+error of any predictor. And because the term still *varies* (sd 0.010–0.015),
+that variation is the single strongest thing selection sees for most of a run.
 
 **Kept for the final series, and reported as a limitation.** Removing a term
 from the published objective is a larger claim than this thesis can support
