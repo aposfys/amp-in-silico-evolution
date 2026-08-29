@@ -5,6 +5,14 @@
 
 torch
 esm
+
+# esm does not declare httpx, but importing it requires it. `from
+# esm.models.esm3 import ESM3` pulls in esm.sdk, which imports the Forge remote
+# inference client unconditionally, which imports httpx -- so a purely local
+# ESM3 run fails at import with ModuleNotFoundError unless httpx is present.
+# Nothing in this pipeline talks to Forge.
+httpx
+
 matplotlib
 tqdm
 MDAnalysis
