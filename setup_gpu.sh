@@ -19,7 +19,46 @@ say() { printf '\n\033[1m── %s\033[0m\n' "$*"; }
 die() { printf '\n*** %s\n' "$*" >&2; exit 1; }
 
 say "prerequisites"
-command -v conda >/dev/null 2>&1 || die "conda not on PATH"
+
+# `conda` is normally a SHELL FUNCTION installed by `conda init`, and shell
+# functions are not inherited by a child process, so `command -v conda` fails
+# inside this script even when conda works perfectly in the shell that launched
+# it. Locate conda.sh and source it instead of testing for the command.
+# Override with CONDA_ROOT=/path/to/conda if the search below misses.
+find_conda_sh() {
+    local p
+    if [ -n "${CONDA_ROOT:-}" ] && [ -f "$CONDA_ROOT/etc/profile.d/conda.sh" ]; then
+        echo "$CONDA_ROOT/etc/profile.d/conda.sh"; return 0
+    fi
+    # CONDA_EXE is exported by conda init and survives into a child process.
+    if [ -n "${CONDA_EXE:-}" ] && [ -x "${CONDA_EXE}" ]; then
+        p="$(dirname "$(dirname "$CONDA_EXE")")/etc/profile.d/conda.sh"
+        [ -f "$p" ] && { echo "$p"; return 0; }
+    fi
+    # An active environment gives the root two levels up from <root>/envs/<name>.
+    if [ -n "${CONDA_PREFIX:-}" ]; then
+        for p in "$CONDA_PREFIX/etc/profile.d/conda.sh" \
+                 "$CONDA_PREFIX/../../etc/profile.d/conda.sh"; do
+            [ -f "$p" ] && { echo "$p"; return 0; }
+        done
+    fi
+    for p in "$HOME/miniconda3" "$HOME/anaconda3" "$HOME/miniforge3" \
+             "$HOME/mambaforge" "$HOME/micromamba" /opt/conda \
+             /usr/local/miniconda3 /usr/local/anaconda3 /opt/miniforge3; do
+        [ -f "$p/etc/profile.d/conda.sh" ] && { echo "$p/etc/profile.d/conda.sh"; return 0; }
+    done
+    return 1
+}
+
+CONDA_SH="$(find_conda_sh)" || {
+    echo "  could not locate conda.sh. Tried CONDA_ROOT, CONDA_EXE, CONDA_PREFIX," >&2
+    echo "  and the usual install prefixes. In the shell where conda works, run:" >&2
+    echo "      echo \"\$CONDA_EXE\"" >&2
+    echo "  then re-run this script as:" >&2
+    echo "      CONDA_ROOT=/path/to/miniconda3 ./setup_gpu.sh" >&2
+    die "conda not found"
+}
+echo "  conda: $CONDA_SH"
 if command -v nvidia-smi >/dev/null 2>&1; then
     nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader | sed 's/^/  /'
 else
@@ -52,15 +91,26 @@ if command -v nvidia-smi >/dev/null 2>&1; then
 fi
 
 say "conda environment: $ENV_NAME"
-source "$(conda info --base)/etc/profile.d/conda.sh"
-conda env list | grep -qE "^${ENV_NAME}\s" \
+# shellcheck disable=SC1090
+source "$CONDA_SH" || die "could not source $CONDA_SH"
+conda env list | grep -qE "^${ENV_NAME}[[:space:]]" \
     && echo "  exists, reusing" \
     || conda create -n "$ENV_NAME" python=3.11 -y
 conda activate "$ENV_NAME" || die "could not activate $ENV_NAME"
 echo "  python: $(command -v python)"
 
+# A run must never inherit packages from whichever environment happened to be
+# active when this was launched. The v2 series lost ~60 h to `conda activate
+# pfes_amps` resolving to the wrong environment of that name.
+case "${CONDA_PREFIX:-}" in
+    */"$ENV_NAME") : ;;
+    *) die "activated '$CONDA_PREFIX', expected an env named '$ENV_NAME'" ;;
+esac
+
 say "torch (CUDA build)"
-pip install --quiet torch --index-url "https://download.pytorch.org/whl/${CU_TAG}" \
+# Not --quiet: this is a ~3 GB download and the longest step in the script.
+# Silence here reads as a hang.
+pip install torch --index-url "https://download.pytorch.org/whl/${CU_TAG}" \
     || die "torch install failed -- try a different CU_TAG, see https://pytorch.org/get-started/locally/"
 python - <<'PY'
 import torch, sys
