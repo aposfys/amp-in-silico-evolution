@@ -64,10 +64,13 @@ Both arms compute and log every quantity either one selects on, so their
 `progress.log` files share a schema and compare column by column — including
 `amp_prob` on the control, which MACREL scores but never drives.
 
-[`production/`](production/) holds the design study the thesis reports: the
-starting populations, the launch scripts, and one compressed archive per run.
-**Read [`production/README.md`](production/README.md) before using any of it** —
-four of the twelve archives came from a series that ran without MACREL.
+**There is no results directory.** Every run predating the v4 series has been
+removed: v1 optimised a different fitness function, v2 completed with neither
+classifier installed, and v3 ran the contact term that counted α-helical
+turns. [`VOID-RUNS.md`](VOID-RUNS.md) records what each series was, what was
+wrong with it, and how to recover the archives from git history. The starting
+populations are unaffected and live in [`init/`](init/) and
+[`init_varlen/`](init_varlen/).
 
 ## The experiment
 
