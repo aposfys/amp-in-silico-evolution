@@ -39,11 +39,33 @@ else
     _pf_fail=1
 fi
 
-if python -c "from esm.models.esm3 import ESM3" >/dev/null 2>&1; then
+if _pf_esm=$(python -c "from esm.models.esm3 import ESM3" 2>&1); then
     echo "  esm3:       ok"
 else
-    echo "  esm3:       *** IMPORT FAILED ***  check the env and HF_TOKEN"
+    # Print the actual error. "check the env and HF_TOKEN" is not a diagnosis,
+    # and the import can fail for reasons that have nothing to do with either --
+    # a missing transitive dependency, a numpy or torch version conflict, or
+    # `esm` resolving to a different PyPI package of the same name.
+    echo "  esm3:       *** IMPORT FAILED ***"
+    printf '%s\n' "$_pf_esm" | tail -5 | sed 's/^/              | /'
+    echo "              full traceback:  python -c 'from esm.models.esm3 import ESM3'"
     _pf_fail=1
+fi
+
+# HF_TOKEN is needed to FETCH the weights, not to import the package. Report it
+# separately so a token problem is never mistaken for an install problem.
+if [ -z "${HF_TOKEN:-}" ]; then
+    if [ -d "${HF_HOME:-$HOME/.cache/huggingface}/hub" ] && \
+       find "${HF_HOME:-$HOME/.cache/huggingface}/hub" -maxdepth 1 -name '*esm3*' 2>/dev/null | grep -q .; then
+        echo "  HF_TOKEN:   not set, but esm3 weights are already cached — ok"
+    else
+        echo "  HF_TOKEN:   *** NOT SET *** and no cached esm3 weights"
+        echo "              accept the licence at huggingface.co/EvolutionaryScale/esm3-sm-open-v1"
+        echo "              then: export HF_TOKEN=hf_...   (add it to ~/.bashrc)"
+        _pf_fail=1
+    fi
+else
+    echo "  HF_TOKEN:   set"
 fi
 
 # End-to-end: does macrel actually return a probability for a known AMP?
