@@ -55,15 +55,35 @@ fi
 echo "arm $ARM  branch $BRANCH  commit $(git rev-parse --short HEAD)"
 
 # --------------------------------------------------------------------------- #
-# Shared host. Rucker has 32 cores and one GPU, and is not exclusively ours.
+# Shared host. Rucker has 32 cores and one GPU and is not exclusively ours.
 # Folding is on the GPU; PSIQUE, MACREL and HemoPI2 stay on the CPU, and thread
 # oversubscription there is what convoyed the v2 series (26 s/generation on a
-# free machine against 415 s under contention). Leave half the cores.
+# free machine against 415 s under contention).
+#
+# CORES is a hard cap, not a hint. Thread-count environment variables only bind
+# libraries that read them, and this pipeline spawns processes that do not:
+# psique is a subprocess per structure, HemoPI2 is a separate program, and
+# onnxruntime picks its own pool. taskset bounds the whole process tree,
+# children included, so 6 means 6.
+CORES="${PFES_CORES:-6}"
+CPUSET="${PFES_CPUSET:-0-$((CORES-1))}"
+
 export KMP_BLOCKTIME=0
-export OMP_WAIT_POLICY=PASSIVE
-export OMP_NUM_THREADS=16
-export MKL_NUM_THREADS=16
+export OMP_WAIT_POLICY=PASSIVE     # sleep rather than spin at the OMP barrier
+export OMP_NUM_THREADS="$CORES"
+export MKL_NUM_THREADS="$CORES"
+export OPENBLAS_NUM_THREADS="$CORES"
+export NUMEXPR_NUM_THREADS="$CORES"
 export TOKENIZERS_PARALLELISM=false
+
+TASKSET=""
+if command -v taskset >/dev/null 2>&1; then
+    TASKSET="taskset -c $CPUSET"
+    echo "cpu cap: $CORES cores, pinned to $CPUSET"
+else
+    echo "cpu cap: $CORES cores by thread count only — taskset not found, so"
+    echo "         subprocesses are NOT bounded. Install util-linux or accept it."
+fi
 
 source "$R/preflight.sh" || exit 1   # macrel/hemopi2/esm3 must really be callable
 
@@ -101,6 +121,7 @@ mkdir -p "$OUT"
   echo "### branch $BRANCH  commit $(git rev-parse HEAD)"
   echo "### pop $POP, $NGEN generations, strong from $STRONG, hemo every $HEMO_EVERY"
   echo "### max-tokens-per-batch $MAXTOK"
+  echo "### cpu cap $CORES cores${TASKSET:+, pinned to $CPUSET}"
   echo "### load at start: $(uptime | sed 's/.*load average/load average/')"
   nvidia-smi --query-gpu=name,memory.used,memory.total,utilization.gpu \
              --format=csv,noheader 2>/dev/null | sed 's/^/### gpu: /'
@@ -109,7 +130,7 @@ mkdir -p "$OUT"
 run () {           # $1 = init fasta   $2 = run name
     local init="$R/$1" name="$2"
     echo "=== $(date '+%F %T') START $name" >> "$LOG"
-    python "$R/pfes.py" --start file --start-file "$init" \
+    $TASKSET python "$R/pfes.py" --start file --start-file "$init" \
         $COMMON -o "$OUT/$name" \
         > "$OUT/$name.console.log" 2>&1
     local rc=$?
