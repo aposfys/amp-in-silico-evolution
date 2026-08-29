@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the PFES-AMPs environment on a CUDA machine, from nothing.
+# Build the amp-in-silico-evolution environment on a CUDA machine, from nothing.
 #
 #   ./setup_gpu.sh [env_name]        # default: pfes_amps
 #
@@ -9,9 +9,10 @@
 # to exactly that, completing with neither classifier installed while its own
 # log header claimed otherwise.
 #
-# NOT TESTED ON CUDA. It was written and syntax-checked on a machine with no
-# NVIDIA GPU, so treat the torch install step as the likely failure point and
-# read what it prints. Everything is idempotent: re-running is safe.
+# Verified on an RTX 5090 (sm_120, driver CUDA 13.2) with torch 2.11.0+cu128:
+# kernel launch ok, macrel 1.6.1 from bioconda, onnxruntime pinned at 1.25.1,
+# preflight green on the magainin-2 probe. Everything is idempotent, so
+# re-running is safe.
 set -u
 ENV_NAME="${1:-pfes_amps}"
 

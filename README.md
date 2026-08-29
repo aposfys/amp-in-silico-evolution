@@ -1,11 +1,16 @@
-# PFES-AMPs
+# amp-in-silico-evolution
 
-In silico evolution of antimicrobial peptides. **ESM3** folds each candidate,
-**MACREL** scores it for antimicrobial activity, and the **PFES** structural
-terms constrain length and secondary structure. **HemoPI2** records hemolysis
-and **AMPlify** re-scores survivors, both as attributes that never touch
-selection. A population of one hundred peptides is mutated and selected for six
-hundred generations.
+**In silico evolution of antimicrobial peptides.** ESM3 folds each candidate,
+MACREL scores it for antimicrobial activity, and the PFES structural terms
+constrain length and secondary structure. HemoPI2 records hemolysis and AMPlify
+re-scores survivors — both as attributes that never touch selection, so they can
+report on the search rather than restate it. A population of one hundred
+peptides is mutated and selected for six hundred generations.
+
+The current work is a controlled ablation: **three starting populations × two
+objectives**, testing whether the AMP character of the winners is caused by the
+objective or is simply what ESM3 fold confidence rewards on its own. See
+[The experiment](#the-experiment).
 
 Built for the MSc thesis *Investigating novel antimicrobial peptides using
 machine learning, structure prediction and in silico evolution* (Apostolos
@@ -57,7 +62,7 @@ is attributable to the objective alone.
 | Branch | Objective | |
 |---|---|---|
 | **`main`** | pLDDT × pTM × length × helix × β × **MACREL** × contacts | the full objective — **the production arm** |
-| **`fitness-esm3`** | pLDDT × pTM | **the control** — fold confidence alone, no structural terms, no classifier |
+| **`control-fold-only`** | pLDDT × pTM | **the control** — fold confidence alone, no structural terms, no classifier |
 | `pfes-original` | — | PFES exactly as published, **unmodified**; the reference this parameterisation is audited against (was `upstream`, originally `alpha`) |
 
 Both arms compute and log every quantity either one selects on, so their
@@ -76,7 +81,7 @@ populations are unaffected and live in [`init/`](init/) and
 
 Three starting populations × two objectives, from identical seeds. Six runs.
 
-| | `main` — structure × MACREL | `fitness-esm3` — pLDDT × pTM |
+| | `main` — structure × MACREL | `control-fold-only` — pLDDT × pTM |
 |---|---|---|
 | random | `v4/main/random` | `v4/ctrl/random` |
 | fragments | `v4/main/fragments` | `v4/ctrl/fragments` |
@@ -84,7 +89,7 @@ Three starting populations × two objectives, from identical seeds. Six runs.
 
 It is an **ablation**, and it works because `amp_prob` is computed on both arms
 but selects on only one. On `main`, MACREL climbing from 0.26 to 0.98 proves
-nothing — it restates what was optimised. On `fitness-esm3` the same column is a
+nothing — it restates what was optimised. On `control-fold-only` the same column is a
 *held-out measurement*, and the difference between the two curves is the causal
 contribution of everything this fork adds to PFES. Until now those terms were
 justified by code audit and exploratory observation, never by a controlled

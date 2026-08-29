@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# PFES-AMPs, series v4 — the objective ablation. Six runs, serial, on a GPU host.
+# amp-in-silico-evolution, series v4 — the objective ablation. Six runs, serial, on a GPU host.
 #
 #   ./run_v4.sh main     # three runs on `main`          (structure x MACREL)
-#   ./run_v4.sh ctrl     # three runs on `fitness-esm3`  (pLDDT x pTM)
+#   ./run_v4.sh ctrl     # three runs on `control-fold-only`  (pLDDT x pTM)
 #
 # Three origins x two objectives from identical starting populations. What the
 # comparison tests, and why one replicate per cell is enough for it, is in the
@@ -15,9 +15,9 @@
 # The two arms live on different branches, so check the control out beside this
 # one rather than switching back and forth in place:
 #
-#   git worktree add ../PFES-AMPs-ctrl fitness-esm3
+#   git worktree add ../amps-ctrl control-fold-only
 #   ./run_v4.sh main                       # from here
-#   cd ../PFES-AMPs-ctrl && ./run_v4.sh ctrl
+#   cd ../amps-ctrl && ./run_v4.sh ctrl
 #
 # Both arms must be seeded from the SAME init files. The control worktree's
 # init/ is a separate checkout of the same committed bytes, which is fine; what
@@ -28,7 +28,7 @@ set -u
 ARM="${1:-}"
 case "$ARM" in
     main) WANT_BRANCH=main         ; TAG="main" ;;
-    ctrl) WANT_BRANCH=fitness-esm3 ; TAG="ctrl" ;;
+    ctrl) WANT_BRANCH=control-fold-only ; TAG="ctrl" ;;
     *)    echo "usage: $0 main|ctrl" >&2; exit 2 ;;
 esac
 

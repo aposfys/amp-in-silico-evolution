@@ -194,7 +194,7 @@ keeps NaN for as long as it survives, including into the final population.
 ([Santos-Júnior et al. 2020](https://peerj.com/articles/10555/)); outside that
 window the biophysical surrogate is substituted per sequence and the column
 changes identity. Filter on `amp_src == 'macrel'` — this matters most on the
-`fitness-esm3` arm, which has no length penalty and whose chains grow past 100.
+`control-fold-only` arm, which has no length penalty and whose chains grow past 100.
 
 ## Note on reproducibility
 
