@@ -1,7 +1,11 @@
 # Third-party components
 
-This repository is MIT licensed ([`LICENSE`](LICENSE)). That covers the work
-here and nothing else. The pipeline bundles one binary and depends on several
+This repository is MIT licensed ([`LICENSE`](LICENSE)), copyright 2026
+Apostolos Fysekidis. That covers the work here and nothing else.
+
+`LICENSE` is deliberately the bare MIT text with no additions, so that GitHub
+and automated licence scanners classify it correctly; everything qualifying it
+lives in this file. The pipeline bundles one binary and depends on several
 models and tools, each under its own terms, and a permissive licence on this
 repository does not extend to any of them.
 

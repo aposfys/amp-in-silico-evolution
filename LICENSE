@@ -19,15 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-This licence covers the work in this repository. It does not cover the
-third-party components that the pipeline bundles or fetches, each of which
-carries its own terms. See NOTICE.md.
-
-This project is a fork of PFES (https://github.com/sahakyanhk/pfes) by Harutyun
-Sahakyan et al., released into the public domain under the Unlicense. That
-dedication imposes no conditions on derivative works, so this fork is licensed
-under the MIT licence above; the upstream code remains public domain and is
-credited in NOTICE.md and in the paper cited throughout the documentation.
