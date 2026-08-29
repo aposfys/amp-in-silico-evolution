@@ -33,6 +33,13 @@ score = pLDDT × pTM × length_penalty × helix_penalty × beta_penalty
 | hemo_prob | HemoPI2 | 0–1 | **no** — logged; `--hemo-in-score` to enable |
 | AMPlify probability | AMPlify | 0–1 | **no** — post-hoc only, never in the loop |
 
+Every constant in that table is justified against its source, and the pressure
+each term actually applies is measured, in [`OBJECTIVE.md`](OBJECTIVE.md). Two
+results from it bear on how any run is read: **pTM is the strongest term in the
+objective and is evaluated below the length floor of its own derivation**, and
+**β = 20 is strong selection by the source paper's own criterion**, not the weak
+selection the flag names.
+
 Hemolysis is measured but never selected on. It is measured at all because it
 is half of what separates an antimicrobial peptide from a detergent: an ideal
 candidate has *"high therapeutic activity and minimum hemolytic activity"*
