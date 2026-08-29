@@ -296,6 +296,20 @@ replication meaningful — but an individual trajectory cannot be regenerated an
 must be preserved from its log and `structures/`. The starting population is the
 one thing that is fixed, and it is fixed by a file, not a seed.
 
+## Licence
+
+MIT ([`LICENSE`](LICENSE)) for the work in this repository. The bundled
+`psique` binary is MIT by Francisco Adasme and carries its own notice at
+[`bin/LICENSE.psique`](bin/LICENSE.psique); the ESM3 weights are gated and
+governed by the terms you accept on HuggingFace, not by this licence. Every
+third-party component is listed in [`NOTICE.md`](NOTICE.md).
+
+This repository previously carried the Unlicense, inherited from upstream PFES
+when it was forked. That was never a deliberate choice here, and it made two
+claims the project could not support: it declared three redistributed
+third-party binaries public domain, and it advertised commercial use for a
+pipeline whose model weights are gated.
+
 ## References
 
 [c21]: https://doi.org/10.1007/s12551-021-00784-y
