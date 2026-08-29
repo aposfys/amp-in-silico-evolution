@@ -64,8 +64,16 @@ if [ -z "${HF_TOKEN:-}" ]; then
         echo "              then: export HF_TOKEN=hf_...   (add it to ~/.bashrc)"
         _pf_fail=1
     fi
+elif [ "${#HF_TOKEN}" -lt 20 ] || case "$HF_TOKEN" in *...*) true ;; *) false ;; esac; then
+    # A placeholder pasted from documentation sets the variable without setting
+    # a token, and every check that only tests for non-empty then passes. Real
+    # tokens are hf_ followed by roughly 34 characters.
+    echo "  HF_TOKEN:   *** SET TO A PLACEHOLDER *** ('$HF_TOKEN')"
+    echo "              that is the example string, not a token. Replace it, and"
+    echo "              check ~/.bashrc if you appended it there."
+    _pf_fail=1
 else
-    echo "  HF_TOKEN:   set"
+    echo "  HF_TOKEN:   set (${#HF_TOKEN} chars)"
 fi
 
 # End-to-end: does macrel actually return a probability for a known AMP?
