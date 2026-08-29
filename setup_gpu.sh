@@ -93,9 +93,21 @@ fi
 say "conda environment: $ENV_NAME"
 # shellcheck disable=SC1090
 source "$CONDA_SH" || die "could not source $CONDA_SH"
+# conda-forge only, --override-channels, and never the Anaconda `defaults`
+# channels. Two reasons, and the first one will stop the script dead otherwise:
+#
+#   Recent conda refuses to solve against repo.anaconda.com/pkgs/main and
+#   /pkgs/r until their Terms of Service are accepted, and that acceptance is a
+#   licensing decision for whoever runs this, not something a setup script
+#   should make on their behalf. Overriding the channels sidesteps it entirely.
+#
+#   Bioconda requires conda-forge, listed first, and mixing `defaults` into a
+#   bioconda solve is a known source of broken environments. macrel comes from
+#   bioconda, so the whole environment is built this way for consistency.
 conda env list | grep -qE "^${ENV_NAME}[[:space:]]" \
     && echo "  exists, reusing" \
-    || conda create -n "$ENV_NAME" python=3.11 -y
+    || conda create -n "$ENV_NAME" python=3.11 -y \
+           -c conda-forge --override-channels
 conda activate "$ENV_NAME" || die "could not activate $ENV_NAME"
 echo "  python: $(command -v python)"
 
@@ -141,16 +153,35 @@ pip install --quiet -r requirements.txt || die "requirements.txt install failed"
 pip install --quiet hemopi2 || echo "  WARNING: hemopi2 failed; set PFES_SKIP_HEMO=1 or fix before running"
 
 say "MACREL"
-conda install -y -c bioconda -c conda-forge macrel >/dev/null 2>&1 \
-    && echo "  $(macrel --version 2>&1 | head -1)" \
-    || die "macrel install failed"
+# conda-forge before bioconda, per bioconda's own channel-order requirement.
+if conda install -y -c conda-forge -c bioconda --override-channels macrel >/dev/null 2>&1; then
+    echo "  $(macrel --version 2>&1 | head -1)  [bioconda]"
+elif pip install --quiet macrel; then
+    # Fallback: bioconda does not always carry a build for the newest Python.
+    # macrel is on PyPI, and preflight probes it end to end either way.
+    echo "  $(macrel --version 2>&1 | head -1)  [pip fallback]"
+else
+    die "macrel install failed from both bioconda and pip"
+fi
 
 say "onnxruntime pin"
+# Installing macrel after requirements.txt can pull onnxruntime past the pin.
+# 1.26 changed the shape of ONNX output_probability, so MACREL returns raw
+# decision values instead of calibrated probabilities and magainin-2 comes back
+# at -0.050, classified NOT an AMP -- sending every candidate to the surrogate,
+# silently. Repair it here rather than reporting it.
+if ! python -c "
+import sys, onnxruntime as o
+from packaging.version import Version
+sys.exit(0 if Version(o.__version__) <= Version('1.25.1') else 1)" 2>/dev/null; then
+    echo "  above the pin after the macrel install — reinstalling"
+    pip install --quiet 'onnxruntime<=1.25.1' || die "could not pin onnxruntime"
+fi
 python - <<'PY'
 import onnxruntime as o
 from packaging.version import Version
 bad = Version(o.__version__) > Version("1.25.1")
-print(f"  onnxruntime {o.__version__}" + ("  *** ABOVE THE PIN — MACREL WILL BE WRONG ***" if bad else "  (ok)"))
+print(f"  onnxruntime {o.__version__}" + ("  *** STILL ABOVE THE PIN — MACREL WILL BE WRONG ***" if bad else "  (ok)"))
 PY
 
 say "ESM3 access"
