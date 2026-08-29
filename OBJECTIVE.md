@@ -87,7 +87,7 @@ that variation is the single strongest thing selection sees for most of a run.
 
 **Kept for the final series, and reported as a limitation.** Removing a term
 from the published objective is a larger claim than this thesis can support
-from one measurement, and `fitness-esm3` — which is pLDDT × pTM alone — already
+from one measurement, and `control-fold-only` — which is pLDDT × pTM alone — already
 measures what these two terms select for on their own. What changes is the
 claim: the objective is not "fold quality × activity", it is "a
 length-mismatched superposition score × activity", and the ranking above is the
