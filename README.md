@@ -12,9 +12,7 @@ objectives**, testing whether the AMP character of the winners is caused by the
 objective or is simply what ESM3 fold confidence rewards on its own. See
 [The experiment](#the-experiment).
 
-Built for the MSc thesis *Investigating novel antimicrobial peptides using
-machine learning, structure prediction and in silico evolution* (Apostolos
-Fysekidis, Bioinformatics, National and Kapodistrian University of Athens), on
+Built on
 top of [PFES](https://github.com/sahakyanhk/pfes) by Sahakyan et al.
 
 ## The objective
