@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PFES-AMPs, series v3. Eight runs, serial, on a free node.
+# amp-in-silico-evolution, series v3. Eight runs, serial, on a free node.
 #
 # Completes the design the v2 series opened. v2 ran random and fragments at the
 # 25-residue cut; v3 adds the sORF arm there, and opens a second length regime

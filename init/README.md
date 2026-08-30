@@ -28,8 +28,39 @@ MACREL already calls an AMP is dropped. Both directories were built with
 |---|---|---|---|
 | `init/init_random.faa` | **0 / 100** | 0.188 | 0.495 |
 | `init/init_fragments.faa` | **0 / 100** | 0.139 | 0.495 |
+| `init/init_orfs.faa` | **0 / 100** | 0.202 | 0.495 |
 | `init_varlen/init_random.faa` | **0 / 100** | — | — |
 | `init_varlen/init_fragments.faa` | **0 / 100** | — | — |
+
+> **Verified 2026-08-30.** The sORF arm was re-scored with
+> `score.macrel_score_batch`, the same function the run calls, and comes back
+> **0 / 100 above 0.5, median 0.202, max 0.495** — the same screen signature as
+> the other two. The three delivered sets are therefore all verified against
+> the function that scores them at run time, and the row above is measured
+> rather than assumed.
+>
+> Median probability does differ across the arms — 0.139 fragments, 0.188
+> random, **0.202 sORF** — so small ORFs do start marginally nearer the class
+> than either comparator. That is a property of small ORFs, not of the
+> assembly, and after screening no set contains a sequence MACREL would call an
+> AMP.
+>
+> ```bash
+> python -c "
+> import score
+> s=[l.strip() for l in open('init/init_orfs.faa') if not l.startswith('>')]
+> d=score.macrel_score_batch(s); v=[t[0] for t in d.values()]
+> print(f'above 0.5: {sum(x>0.5 for x in v)}/{len(v)}  max {max(v):.3f}')"
+> ```
+>
+> Two files this document refers to do not exist: `init_orfs.tsv` (the
+> per-fragment provenance record) and `init_orfs.draw1_prescreen.faa`. The
+> `--orfs` provenance TSV was added in `cd673f6`, after these sets were built.
+> **Do not regenerate the set to produce them** — screening changes which draws
+> are accepted and therefore the whole RNG stream, so `make_init_sets.py` would
+> return a different set of 100 and invalidate every run seeded from this file.
+> The TSV has to be reconstructed from the existing FASTA headers against
+> `source_sorfs.tsv`.
 
 The maximum of exactly 0.495 in both `init/` files is the screen's signature:
 MACREL is a random forest, so its probabilities fall on a discrete grid, and a
@@ -253,10 +284,38 @@ arms it is compared against is measuring length, not origin.
 |---|---|---|---|---|---|
 | random | 25 | +0.02 | −4 to +5 | 41% | 4.9% |
 | fragments | 25 | −0.19 | −7 to +5 | 37% | 5.8% |
+| sORF | 25 | +0.49 | −8 to +7 | 35% | — |
 
 Hydrophobic is the fraction of AVLIMFWC; charge counts K and R as +1 and D and E
 as −1. (§2.4.8 of the thesis reports +0.05 and −0.19 from a pH-7 calculation that
 also gives histidine a partial charge; the two agree to within that difference.)
+
+### Matched against the analysis definitions
+
+The table above uses this file's own conventions, which are **not** the ones
+`analysis/score_posthoc.py` applies to the final populations: it counts
+histidine at +0.1 and includes tyrosine among the hydrophobic residues
+(`AVLIMFWYC`). Recomputed under those definitions, so that a starting value and
+a final value mean the same thing:
+
+| arm | n | unique | net charge | sd | hydrophobic | sd |
+|---|---|---|---|---|---|---|
+| random | 100 | 100 | +0.13 | 2.03 | 0.464 | 0.093 |
+| fragments | 100 | 100 | −0.11 | 2.38 | 0.398 | 0.093 |
+| sORF | 100 | 100 | +0.57 | 2.90 | 0.381 | 0.120 |
+
+**The spread between arms is smaller than the spread within any one of them** —
+0.68 in charge against standard deviations of 2.0–2.9, and 0.083 in hydrophobic
+fraction against 0.09–0.12. The three origins are therefore indistinguishable in
+the bulk composition the objective rewards, and differ only in provenance, which
+is what the comparison requires. All three are 100 sequences, all distinct, all
+exactly 25 residues.
+
+One consequence worth stating, because it constrains how a result may be read:
+these starting differences are far too small to carry a compositional difference
+through to the final population by inheritance. Any endpoint separation of the
+size reported in §3.2 — several charge units — has to be produced by the search,
+not transported from the seed.
 
 The two sets are matched in length and close in mean charge and hydrophobic
 content, so neither starts with the amphipathic composition an AMP needs, which
