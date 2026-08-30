@@ -448,9 +448,12 @@ def calculate_hemo_proxy(sequence):
     return round(min(max(hemo, 0.0), 1.0), 4)
 
 
-def hemopi2_score_batch(sequences, model=1):
+HEMOPI2_MODEL = int(os.environ.get('PFES_HEMO_MODEL', '3'))
+
+
+def hemopi2_score_batch(sequences, model=None):
     """
-    Predict hemolytic probability with HemoPI2 (Raghava lab, 2024).
+    Predict hemolytic probability with HemoPI2 (Rathore et al. 2025).
     Returns dict {sequence: hemo_probability in [0, 1]}, higher = more hemolytic.
 
     HemoPI2 replaces the old biophysical calculate_hemo_proxy. It is an ML model
@@ -461,13 +464,35 @@ def hemopi2_score_batch(sequences, model=1):
 
     Install:  pip install hemopi2
     CLI:      hemopi2_classification -i in.fa -o out.csv -m {1=RF,2=RF+MERCI,3=ESM2,4=ESM+MERCI}
-    model=1 (Random Forest) is used here: fastest and dependency-light (no Perl/MERCI),
-    appropriate for per-generation scoring inside the evolutionary loop. Switch to
-    model=3 (ESM2-t6) for slightly higher accuracy at extra cost.
+
+    **model=3 (ESM2-t6), not the package default.** Measured on magainin 2,
+    melittin and poly-alanine, three of the four models are unusable:
+
+        m=1 RF          12.000  44.535   2.710   -- not in [0,1] at all
+        m=2 RF+MERCI    MERCI -1.0 for every sequence, Hybrid pinned to 1.0
+        m=3 ESM2-t6      0.229   0.764   0.638   -- in range, correctly ordered
+        m=4 ESM2+MERCI  MERCI -1.0 for every sequence, Hybrid pinned to 0.0
+
+    HemoPI2 documents a decision threshold of 0.46 (RF) or 0.55 (ESM), so the
+    score is a probability by construction; models 1 and 2 emit uncalibrated
+    values, and against a 0.46 threshold every peptide including poly-alanine is
+    then called hemolytic. MERCI returns its -1.0 sentinel for everything, which
+    makes both hybrids degenerate in opposite directions -- model 4, the package
+    default, calls melittin non-hemolytic. Only the ESM2 path is sound here.
+
+    This is the MACREL onnxruntime failure in a second tool: a classifier
+    returning raw decision values rather than calibrated probabilities, with the
+    threshold comparison then marking everything positive. The [0,1] range check
+    below is what catches it; clamping instead would have logged 1.0000 for every
+    candidate of every generation and looked entirely plausible.
+
+    Override with PFES_HEMO_MODEL if a future release repairs the others.
 
     Falls back per-sequence to calculate_hemo_proxy if HemoPI2 is not installed
     or fails.
     """
+    if model is None:
+        model = HEMOPI2_MODEL
     import subprocess, tempfile
     if os.environ.get("PFES_SKIP_HEMO") == "1":
         # Hemolysis is attribute-only; skip the per-generation HemoPI2 subprocess
@@ -540,6 +565,37 @@ def hemopi2_score_batch(sequences, model=1):
             ' — using biophysical hemo proxy fallback\n'
         )
         return fallback
+
+
+def hemopi2_agrees():
+    """True if HemoPI2 is installed, in range, and oriented the right way.
+
+    Range alone is not enough. Model 4 returns a Hybrid Score of exactly 0.0 for
+    every sequence -- perfectly inside [0,1] and perfectly useless, and it calls
+    melittin non-hemolytic. So check the ordering against peptides whose relative
+    hemolytic activity is not in question: melittin is the bee-venom lytic
+    peptide and must outrank magainin 2, which is the standard example of an
+    antimicrobial peptide with minimal hemolysis.
+
+    Mirrors macrel_inproc_agrees(). Used by preflight.sh; a run that fails this
+    is logging something other than what hemo_prob claims to be.
+    """
+    MELITTIN = 'GIGAVLKVLTTGLPALISWIKRKRQQ'
+    MAGAININ = 'GIGKFLHSAKKFGKAFVGEIMNS'
+    d = hemopi2_score_batch([MAGAININ, MELITTIN])
+    mag, mel = d.get(MAGAININ), d.get(MELITTIN)
+    if mag is None or mel is None:
+        return False, 'HemoPI2 returned no score'
+    # An exact match against the surrogate means HemoPI2 never answered.
+    if (abs(mag - calculate_hemo_proxy(MAGAININ)) < 1e-9
+            and abs(mel - calculate_hemo_proxy(MELITTIN)) < 1e-9):
+        return False, 'returned the biophysical surrogate, not HemoPI2'
+    if mel <= mag:
+        return False, (f'orientation wrong: melittin {mel:.3f} does not exceed '
+                       f'magainin 2 {mag:.3f}')
+    if mel == mag:
+        return False, 'degenerate: both peptides scored identically'
+    return True, f'magainin 2 {mag:.3f} < melittin {mel:.3f}'
 
 
 def _macrel_subprocess(sequences):
