@@ -1,4 +1,4 @@
-# PFES-AMPs — `fitness-esm3`
+# amp-in-silico-evolution — `control-fold-only`
 
 **The control arm.** Selection is driven by nothing but the two numbers ESM3
 emits. No structural penalties, no secondary structure, no activity classifier.
@@ -70,3 +70,28 @@ matching score scale makes the comparison meaningless.
 Install, starting populations, analysis and the post-hoc AMPlify audit are
 identical to the production branch — see
 [`main`](../../tree/main).
+
+## Kept in step with `main`
+
+This arm exists to differ from the production arm in **one** respect: the
+objective. Everything else — the scorers, their versions, the guards, the
+starting populations — must be identical, or a difference between the arms is
+not attributable to the objective at all. That is not hypothetical: the previous
+series compared four runs scored by a biophysical surrogate against two scored
+by MACREL and reported the difference as an origin effect
+([`VOID-RUNS.md`](VOID-RUNS.md)).
+
+So this branch is **merged from `main`**, never cherry-picked. The only content
+that is deliberately its own is the `score = np.prod([mean_plddt, ptm])` block
+in `pfes.py`, the startup banner that reports it, and this README. Before
+launching, confirm the two arms agree on what they are scoring with:
+
+```bash
+git log --oneline -1 main control-fold-only
+python -c "import score; print('hemo model', score.HEMOPI2_MODEL)"   # must match main
+./preflight.sh                                                       # must pass identically
+```
+
+`run_v4.sh ctrl` refuses to start unless this checkout is on
+`control-fold-only`, so it cannot silently run the production objective under
+the control's name.

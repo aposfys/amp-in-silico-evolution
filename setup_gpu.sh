@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the PFES-AMPs environment on a CUDA machine, from nothing.
+# Build the amp-in-silico-evolution environment on a CUDA machine, from nothing.
 #
 #   ./setup_gpu.sh [env_name]        # default: pfes_amps
 #
@@ -9,9 +9,10 @@
 # to exactly that, completing with neither classifier installed while its own
 # log header claimed otherwise.
 #
-# NOT TESTED ON CUDA. It was written and syntax-checked on a machine with no
-# NVIDIA GPU, so treat the torch install step as the likely failure point and
-# read what it prints. Everything is idempotent: re-running is safe.
+# Verified on an RTX 5090 (sm_120, driver CUDA 13.2) with torch 2.11.0+cu128:
+# kernel launch ok, macrel 1.6.1 from bioconda, onnxruntime pinned at 1.25.1,
+# preflight green on the magainin-2 probe. Everything is idempotent, so
+# re-running is safe.
 set -u
 ENV_NAME="${1:-pfes_amps}"
 
@@ -19,7 +20,46 @@ say() { printf '\n\033[1m── %s\033[0m\n' "$*"; }
 die() { printf '\n*** %s\n' "$*" >&2; exit 1; }
 
 say "prerequisites"
-command -v conda >/dev/null 2>&1 || die "conda not on PATH"
+
+# `conda` is normally a SHELL FUNCTION installed by `conda init`, and shell
+# functions are not inherited by a child process, so `command -v conda` fails
+# inside this script even when conda works perfectly in the shell that launched
+# it. Locate conda.sh and source it instead of testing for the command.
+# Override with CONDA_ROOT=/path/to/conda if the search below misses.
+find_conda_sh() {
+    local p
+    if [ -n "${CONDA_ROOT:-}" ] && [ -f "$CONDA_ROOT/etc/profile.d/conda.sh" ]; then
+        echo "$CONDA_ROOT/etc/profile.d/conda.sh"; return 0
+    fi
+    # CONDA_EXE is exported by conda init and survives into a child process.
+    if [ -n "${CONDA_EXE:-}" ] && [ -x "${CONDA_EXE}" ]; then
+        p="$(dirname "$(dirname "$CONDA_EXE")")/etc/profile.d/conda.sh"
+        [ -f "$p" ] && { echo "$p"; return 0; }
+    fi
+    # An active environment gives the root two levels up from <root>/envs/<name>.
+    if [ -n "${CONDA_PREFIX:-}" ]; then
+        for p in "$CONDA_PREFIX/etc/profile.d/conda.sh" \
+                 "$CONDA_PREFIX/../../etc/profile.d/conda.sh"; do
+            [ -f "$p" ] && { echo "$p"; return 0; }
+        done
+    fi
+    for p in "$HOME/miniconda3" "$HOME/anaconda3" "$HOME/miniforge3" \
+             "$HOME/mambaforge" "$HOME/micromamba" /opt/conda \
+             /usr/local/miniconda3 /usr/local/anaconda3 /opt/miniforge3; do
+        [ -f "$p/etc/profile.d/conda.sh" ] && { echo "$p/etc/profile.d/conda.sh"; return 0; }
+    done
+    return 1
+}
+
+CONDA_SH="$(find_conda_sh)" || {
+    echo "  could not locate conda.sh. Tried CONDA_ROOT, CONDA_EXE, CONDA_PREFIX," >&2
+    echo "  and the usual install prefixes. In the shell where conda works, run:" >&2
+    echo "      echo \"\$CONDA_EXE\"" >&2
+    echo "  then re-run this script as:" >&2
+    echo "      CONDA_ROOT=/path/to/miniconda3 ./setup_gpu.sh" >&2
+    die "conda not found"
+}
+echo "  conda: $CONDA_SH"
 if command -v nvidia-smi >/dev/null 2>&1; then
     nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader | sed 's/^/  /'
 else
@@ -52,15 +92,45 @@ if command -v nvidia-smi >/dev/null 2>&1; then
 fi
 
 say "conda environment: $ENV_NAME"
-source "$(conda info --base)/etc/profile.d/conda.sh"
-conda env list | grep -qE "^${ENV_NAME}\s" \
+# shellcheck disable=SC1090
+source "$CONDA_SH" || die "could not source $CONDA_SH"
+# conda-forge only, --override-channels, and never the Anaconda `defaults`
+# channels. Two reasons, and the first one will stop the script dead otherwise:
+#
+#   Recent conda refuses to solve against repo.anaconda.com/pkgs/main and
+#   /pkgs/r until their Terms of Service are accepted, and that acceptance is a
+#   licensing decision for whoever runs this, not something a setup script
+#   should make on their behalf. Overriding the channels sidesteps it entirely.
+#
+#   Bioconda requires conda-forge, listed first, and mixing `defaults` into a
+#   bioconda solve is a known source of broken environments. macrel comes from
+#   bioconda, so the whole environment is built this way for consistency.
+conda env list | grep -qE "^${ENV_NAME}[[:space:]]" \
     && echo "  exists, reusing" \
-    || conda create -n "$ENV_NAME" python=3.11 -y
+    || conda create -n "$ENV_NAME" python=3.11 -y \
+           -c conda-forge --override-channels
 conda activate "$ENV_NAME" || die "could not activate $ENV_NAME"
 echo "  python: $(command -v python)"
 
+# A run must never inherit packages from whichever environment happened to be
+# active when this was launched. The v2 series lost ~60 h to `conda activate
+# pfes_amps` resolving to the wrong environment of that name.
+case "${CONDA_PREFIX:-}" in
+    */"$ENV_NAME") : ;;
+    *) die "activated '$CONDA_PREFIX', expected an env named '$ENV_NAME'" ;;
+esac
+
 say "torch (CUDA build)"
-pip install --quiet torch --index-url "https://download.pytorch.org/whl/${CU_TAG}" \
+# Not --quiet: this is a ~3 GB download and the longest step in the script.
+# Silence here reads as a hang.
+# torchvision comes from the SAME index as torch, deliberately. Nothing here
+# uses it directly, but `pip install hemopi2` pulls transformers, transformers
+# imports torchvision, and torchvision aborts the import if it was built for a
+# different CUDA major version than torch. Installed separately from PyPI it
+# picks the newest CUDA build and mismatches -- on rucker, torch cu128 against
+# torchvision cu130 -- which silently sent every hemo_prob to the biophysical
+# surrogate for a whole run.
+pip install torch torchvision --index-url "https://download.pytorch.org/whl/${CU_TAG}" \
     || die "torch install failed -- try a different CU_TAG, see https://pytorch.org/get-started/locally/"
 python - <<'PY'
 import torch, sys
@@ -90,17 +160,80 @@ say "pipeline dependencies"
 pip install --quiet -r requirements.txt || die "requirements.txt install failed"
 pip install --quiet hemopi2 || echo "  WARNING: hemopi2 failed; set PFES_SKIP_HEMO=1 or fix before running"
 
+# hemopi2 pulls transformers, which can pull a PyPI torchvision over the CUDA
+# build installed above. Put it back if so.
+if ! python -c "import torch, torchvision, sys; sys.exit(0 if torch.version.cuda.split('.')[0] == torchvision.version.cuda.split('.')[0] else 1)" 2>/dev/null; then
+    echo "  torchvision CUDA major does not match torch — reinstalling from ${CU_TAG}"
+    # --no-deps is essential. Without it pip reinstalls torch's entire dependency
+    # tree from the PyTorch index, which does not honour requirements.txt, and
+    # numpy comes back at 2.x -- which breaks HemoPI2's pickled scikit-learn
+    # models, the very failure this block exists to repair.
+    pip install --quiet --force-reinstall --no-deps torchvision \
+        --index-url "https://download.pytorch.org/whl/${CU_TAG}" \
+        || die "could not align torchvision with torch"
+fi
+
 say "MACREL"
-conda install -y -c bioconda -c conda-forge macrel >/dev/null 2>&1 \
-    && echo "  $(macrel --version 2>&1 | head -1)" \
-    || die "macrel install failed"
+# conda-forge before bioconda, per bioconda's own channel-order requirement.
+if conda install -y -c conda-forge -c bioconda --override-channels macrel >/dev/null 2>&1; then
+    echo "  $(macrel --version 2>&1 | head -1)  [bioconda]"
+elif pip install --quiet macrel; then
+    # Fallback: bioconda does not always carry a build for the newest Python.
+    # macrel is on PyPI, and preflight probes it end to end either way.
+    echo "  $(macrel --version 2>&1 | head -1)  [pip fallback]"
+else
+    die "macrel install failed from both bioconda and pip"
+fi
+
+say "version pins"
+# Every bound here marks a version that broke the pipeline silently, producing
+# wrong numbers rather than an error. A torch install, a macrel install and a
+# hemopi2 install can each move them, so they are checked last and repaired
+# rather than merely reported.
+#
+#   numpy<2            numpy 2 breaks HemoPI2's pickled scikit-learn models
+#   onnxruntime<=1.25.1  1.26 changed ONNX output_probability, so MACREL returns
+#                        raw decision values and magainin-2 comes back at -0.050
+_pins_ok=$(python -c "
+from packaging.version import Version
+import numpy, onnxruntime
+bad = []
+if Version(numpy.__version__) >= Version('2'):
+    bad.append('numpy ' + numpy.__version__)
+if Version(onnxruntime.__version__) > Version('1.25.1'):
+    bad.append('onnxruntime ' + onnxruntime.__version__)
+print('|'.join(bad))" 2>/dev/null)
+if [ -n "$_pins_ok" ]; then
+    echo "  out of bounds: ${_pins_ok//|/, } — repairing"
+    pip install --quiet 'numpy<2' 'onnxruntime<=1.25.1' \
+        || die "could not restore the version pins"
+fi
+python -c "
+import numpy, onnxruntime
+try:
+    import sklearn; sk = sklearn.__version__
+except Exception as e:
+    sk = 'IMPORT FAILED (' + type(e).__name__ + ')'
+print(f'  numpy {numpy.__version__}  onnxruntime {onnxruntime.__version__}  scikit-learn {sk}')"
 
 say "onnxruntime pin"
+# Installing macrel after requirements.txt can pull onnxruntime past the pin.
+# 1.26 changed the shape of ONNX output_probability, so MACREL returns raw
+# decision values instead of calibrated probabilities and magainin-2 comes back
+# at -0.050, classified NOT an AMP -- sending every candidate to the surrogate,
+# silently. Repair it here rather than reporting it.
+if ! python -c "
+import sys, onnxruntime as o
+from packaging.version import Version
+sys.exit(0 if Version(o.__version__) <= Version('1.25.1') else 1)" 2>/dev/null; then
+    echo "  above the pin after the macrel install — reinstalling"
+    pip install --quiet 'onnxruntime<=1.25.1' || die "could not pin onnxruntime"
+fi
 python - <<'PY'
 import onnxruntime as o
 from packaging.version import Version
 bad = Version(o.__version__) > Version("1.25.1")
-print(f"  onnxruntime {o.__version__}" + ("  *** ABOVE THE PIN — MACREL WILL BE WRONG ***" if bad else "  (ok)"))
+print(f"  onnxruntime {o.__version__}" + ("  *** STILL ABOVE THE PIN — MACREL WILL BE WRONG ***" if bad else "  (ok)"))
 PY
 
 say "ESM3 access"

@@ -2,6 +2,22 @@
 
 Every script that produces a graph in this project, and where it came from.
 
+The objective these scripts describe is the one in [`OBJECTIVE.md`](../OBJECTIVE.md),
+which traces every constant to its source and measures the pressure each term
+applies. Two of its findings change how output should be read, so they are
+repeated here rather than left to be discovered: **pTM is the strongest term in
+the fitness for most of a run** and is evaluated below the length floor of its
+own derivation, and **β = 20 is strong selection** by the source paper's own
+criterion, not the weak selection the flag names.
+
+> `make_word.py` and `make_ppt.py` were removed. They were v1-era report
+> generators hard-coded to `results_macrel_300/` and `results_macrel_pfes_300/`,
+> both since deleted, and they documented the fitness as containing
+> `(1 − hemo_proxy)`. Hemolysis has not been in the score since; it is an
+> attribute, and putting a safety term in the objective is the thing this design
+> deliberately does not do. Recover them from git history if the layout is ever
+> useful: `git show fba3369:analysis/make_word.py`.
+
 ## Inherited from upstream PFES
 
 Both live at the repository root, at their original paths, so the upstream
@@ -59,7 +75,7 @@ of run directories, groups them by objective, and plots each metric as a mean
 with an across-repeat band.
 
 ```bash
-python analysis/compare_runs.py results/final/*/ -o results/comparison
+python analysis/compare_runs.py results/v4/*/*/ -o results/v4/comparison
 ```
 
 | Output | Shows |
@@ -83,9 +99,9 @@ Two counting conventions, because both are easy to get wrong:
   `visual_pfes.extract_lineage` writes its starting node twice, so
   `lineage.tsv` has one more row than the line has members.
 - `winner_*` describes the **globally** best individual, which is not always the
-  best of the final generation. The structured arm peaks at generation 241 and
-  drifts down. The lineage is traced from the final generation's best, matching
-  `lineage.tsv`; the global best lies on that line but is not its endpoint.
+  best of the final generation, because a run can peak and drift down. The
+  lineage is traced from the final generation's best, matching `lineage.tsv`;
+  the global best lies on that line but is not necessarily its endpoint.
 
 ### `score_posthoc.py` — the independent audit
 
@@ -95,7 +111,7 @@ and never sees the search, so its verdict is independent evidence.
 
 ```bash
 export AMPLIFY_CMD="conda run -n amplify AMPlify"   # own env: py3.6, old TF
-python analysis/score_posthoc.py results/final/*/ -o results/comparison
+python analysis/score_posthoc.py results/v4/*/*/ -o results/v4/comparison
 ```
 
 | Output | Shows |
@@ -118,17 +134,67 @@ figure it could not draw.
 | Script | Produces |
 |---|---|
 | `make_loop_diagram.py` | `loop_diagram.png`, the evolutionary-loop schematic (matplotlib) |
-| `make_ppt.py` | arm-comparison figures and a `.pptx` deck (matplotlib, python-pptx) |
-| `make_word.py` | a `.docx` analysis report from one or more run logs (python-docx) |
+| `make_init_sets.py` | the three starting populations; see [`init/README.md`](../init/README.md) |
+| `build_sorf_source.py` | `source_sorfs.faa`, the sampling frame for the sORF arm |
 
-Run them from the repository root so relative paths to `results/` resolve:
+Run them from the repository root so relative paths resolve:
 
 ```bash
 python analysis/make_loop_diagram.py
 ```
 
-Their output (`*.docx`, `*.pptx`, root-level `*.png`) is gitignored, being
-regenerable from the logs.
+Root-level `*.png` output is gitignored, being regenerable from the logs.
+
+## What the analysis assumes, and where those choices come from
+
+Conventions that appear in more than one script, stated once so a number is not
+computed two ways in two places.
+
+**Net charge** counts K and R as +1, D and E as −1, and H as +0.1 for its
+approximate protonated fraction at pH 7.4 (`score_posthoc.py:58`). That
+reproduces the +5.2 reported for the structured winner. The evolved populations
+reach +6 to +7, inside but at the top of the +2 to +9 range reported for the
+class ([Zhang et al. 2021](https://doi.org/10.1186/s40779-021-00343-2)) and well
+above the +2.5 mean of the anuran set.
+
+**Hydrophobic fraction** is `AVLIMFWYC` in `score_posthoc.py:66` — including
+tyrosine. [`init/README.md`](../init/README.md) reports starting compositions on
+`AVLIMFWC`, *excluding* it, so its own table and this one are not directly
+comparable; the matched recomputation is given there. Check which definition a
+figure used before comparing a starting value with a final one.
+
+**AMPlify is the auditor, never the objective.** MACREL drives selection, so a
+high MACREL score on an evolved peptide restates the objective rather than
+corroborating it; AMPlify shares neither MACREL's input representation, its
+inductive bias, nor its training set
+([Li et al. 2022](https://doi.org/10.1186/s12864-022-08310-4)), so its errors are
+usefully independent. The asymmetry is permanent, not provisional: AMPlify
+saturates at exactly 1.0000 for a large fraction of AMP-like candidates, and a
+term pinned at its ceiling supplies no gradient for selection to climb.
+Generating under classifier guidance and screening with filters the generator
+never saw follows
+[Das et al. (Nat Biomed Eng 2021)](https://www.nature.com/articles/s41551-021-00689-x);
+the reason it is necessary is that optimising a learned predictor drives the
+search to where the predictor is unreliable
+([Brookes, Park & Listgarten, ICML 2019](https://proceedings.mlr.press/v97/brookes19a.html)).
+
+**Hemolysis is read, never optimised.** HemoPI2
+([Chaudhary et al. 2016](https://doi.org/10.1038/srep22843)) is logged and never
+enters the fitness, which is what lets it report on where a search went rather
+than on how well the search satisfied it. The quantity it speaks to is the
+therapeutic index, the ratio of minimum haemolytic to minimum inhibitory
+concentration ([Cardoso et al. 2021](https://doi.org/10.1007/s12551-021-00784-y)).
+
+**`--hemo-every N` leaves gaps that must be recovered.** `hemo_prob` is cached
+with the sequence, so a molecule first evaluated in an unmeasured generation
+keeps NaN for as long as it survives, including into the final population.
+`score_posthoc.py --lineage` scores the ancestral line post hoc and closes them.
+
+**`amp_src` before `amp_prob`.** MACREL is defined for 10–100 residues
+([Santos-Júnior et al. 2020](https://peerj.com/articles/10555/)); outside that
+window the biophysical surrogate is substituted per sequence and the column
+changes identity. Filter on `amp_src == 'macrel'` — this matters most on the
+`control-fold-only` arm, which has no length penalty and whose chains grow past 100.
 
 ## Note on reproducibility
 

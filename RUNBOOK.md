@@ -118,7 +118,7 @@ sparsely-sampled run.
 ## The series
 
 Production arm only (`main`), three origins, two replicates — **6 runs**.
-The control arm (`fitness-esm3`) follows once these look right.
+The control arm (`control-fold-only`) follows once these look right.
 
 ```bash
 ./preflight.sh || exit 1        # must pass; every launcher sources it
