@@ -52,9 +52,29 @@ PY
                  _pf_fail=1 ;;
         proxy)   echo "  hemopi2:    *** INSTALLED BUT NOT WORKING ***"
                  echo "              it returned the biophysical surrogate, not HemoPI2."
-                 echo "              diagnose:  hemopi2_classification --help"
-                 echo "              common cause: torch and torchvision built for different"
-                 echo "              CUDA majors, which aborts the transformers import."
+                 # Name the cause rather than guessing at it. Both known failures
+                 # are import-time and both are version skew in the torch stack.
+                 python - <<'PY' 2>/dev/null | sed 's/^/              /'
+from packaging.version import Version
+try:
+    import numpy
+    if Version(numpy.__version__) >= Version("2"):
+        print(f"cause: numpy {numpy.__version__} against the numpy<2 pin —")
+        print("       HemoPI2's pickled scikit-learn models cannot load.")
+        print("       fix:   pip install 'numpy<2'")
+except Exception:
+    pass
+try:
+    import torch, torchvision
+    if torch.version.cuda.split(".")[0] != torchvision.version.cuda.split(".")[0]:
+        print(f"cause: torch CUDA {torch.version.cuda} against torchvision "
+              f"{torchvision.version.cuda} — the transformers import aborts.")
+        print("       fix:   pip install --force-reinstall --no-deps torchvision \\")
+        print("                  --index-url https://download.pytorch.org/whl/cu128")
+except Exception:
+    pass
+PY
+                 echo "              full error:  hemopi2_classification --help"
                  _pf_fail=1 ;;
         *)       echo "  hemopi2:    $(command -v hemopi2_classification)  (magainin-2 -> $_pf_hemo)" ;;
     esac

@@ -164,7 +164,11 @@ pip install --quiet hemopi2 || echo "  WARNING: hemopi2 failed; set PFES_SKIP_HE
 # build installed above. Put it back if so.
 if ! python -c "import torch, torchvision, sys; sys.exit(0 if torch.version.cuda.split('.')[0] == torchvision.version.cuda.split('.')[0] else 1)" 2>/dev/null; then
     echo "  torchvision CUDA major does not match torch — reinstalling from ${CU_TAG}"
-    pip install --quiet --force-reinstall torchvision \
+    # --no-deps is essential. Without it pip reinstalls torch's entire dependency
+    # tree from the PyTorch index, which does not honour requirements.txt, and
+    # numpy comes back at 2.x -- which breaks HemoPI2's pickled scikit-learn
+    # models, the very failure this block exists to repair.
+    pip install --quiet --force-reinstall --no-deps torchvision \
         --index-url "https://download.pytorch.org/whl/${CU_TAG}" \
         || die "could not align torchvision with torch"
 fi
@@ -180,6 +184,37 @@ elif pip install --quiet macrel; then
 else
     die "macrel install failed from both bioconda and pip"
 fi
+
+say "version pins"
+# Every bound here marks a version that broke the pipeline silently, producing
+# wrong numbers rather than an error. A torch install, a macrel install and a
+# hemopi2 install can each move them, so they are checked last and repaired
+# rather than merely reported.
+#
+#   numpy<2            numpy 2 breaks HemoPI2's pickled scikit-learn models
+#   onnxruntime<=1.25.1  1.26 changed ONNX output_probability, so MACREL returns
+#                        raw decision values and magainin-2 comes back at -0.050
+_pins_ok=$(python -c "
+from packaging.version import Version
+import numpy, onnxruntime
+bad = []
+if Version(numpy.__version__) >= Version('2'):
+    bad.append('numpy ' + numpy.__version__)
+if Version(onnxruntime.__version__) > Version('1.25.1'):
+    bad.append('onnxruntime ' + onnxruntime.__version__)
+print('|'.join(bad))" 2>/dev/null)
+if [ -n "$_pins_ok" ]; then
+    echo "  out of bounds: ${_pins_ok//|/, } — repairing"
+    pip install --quiet 'numpy<2' 'onnxruntime<=1.25.1' \
+        || die "could not restore the version pins"
+fi
+python -c "
+import numpy, onnxruntime
+try:
+    import sklearn; sk = sklearn.__version__
+except Exception as e:
+    sk = 'IMPORT FAILED (' + type(e).__name__ + ')'
+print(f'  numpy {numpy.__version__}  onnxruntime {onnxruntime.__version__}  scikit-learn {sk}')"
 
 say "onnxruntime pin"
 # Installing macrel after requirements.txt can pull onnxruntime past the pin.
