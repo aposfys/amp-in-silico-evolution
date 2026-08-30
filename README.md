@@ -66,6 +66,12 @@ Both arms compute and log every quantity either one selects on, so their
 `progress.log` files share a schema and compare column by column — including
 `amp_prob` on the control, which MACREL scores but never drives.
 
+**[`RESULTS.md`](RESULTS.md) has the outcome of the v4 series** — six runs,
+complete, both arms verified against an identical preflight. Headline: MACREL
+probability reads **0.980–0.990** under the full objective against
+**0.028–0.114** under fold confidence alone, on a column the control never
+selected on.
+
 **There is no results directory.** Every run predating the v4 series has been
 removed: v1 optimised a different fitness function, v2 completed with neither
 classifier installed, and v3 ran the contact term that counted α-helical
