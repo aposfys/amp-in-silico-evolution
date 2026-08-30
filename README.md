@@ -12,8 +12,7 @@ objectives**, testing whether the AMP character of the winners is caused by the
 objective or is simply what ESM3 fold confidence rewards on its own. See
 [The experiment](#the-experiment).
 
-Built on
-top of [PFES](https://github.com/sahakyanhk/pfes) by Sahakyan et al.
+Built on top of [PFES](https://github.com/sahakyanhk/pfes) by Sahakyan et al.
 
 ## The objective
 
