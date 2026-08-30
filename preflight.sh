@@ -30,7 +30,34 @@ else
 fi
 
 if command -v hemopi2_classification >/dev/null 2>&1; then
-    echo "  hemopi2:    $(command -v hemopi2_classification)"
+    # The executable existing is not the same as it working. On rucker it was
+    # installed and on PATH, and every invocation raised at import -- transformers
+    # pulls in torchvision, and a torchvision built for a different CUDA major
+    # version than torch aborts the import. score.py then falls back per sequence
+    # to calculate_hemo_proxy and warns only on stderr, so an entire run logs a
+    # biophysical surrogate in the hemo_prob column while preflight reports the
+    # tool as present. Probe it end to end, the way macrel is probed.
+    _pf_hemo=$(python - <<'PY' 2>/dev/null
+import score, sys
+d = score.hemopi2_score_batch(['GIGKFLHSAKKFGKAFVGEIMNS'])   # magainin-2
+v = list(d.values())[0]
+# calculate_hemo_proxy is deterministic; if HemoPI2 did not answer, the value
+# is exactly what the surrogate returns for this sequence.
+print('proxy' if abs(v - score.calculate_hemo_proxy('GIGKFLHSAKKFGKAFVGEIMNS')) < 1e-9
+      else f'{v:.4f}')
+PY
+)
+    case "$_pf_hemo" in
+        "")      echo "  hemopi2:    *** CALL FAILED *** $(command -v hemopi2_classification)"
+                 _pf_fail=1 ;;
+        proxy)   echo "  hemopi2:    *** INSTALLED BUT NOT WORKING ***"
+                 echo "              it returned the biophysical surrogate, not HemoPI2."
+                 echo "              diagnose:  hemopi2_classification --help"
+                 echo "              common cause: torch and torchvision built for different"
+                 echo "              CUDA majors, which aborts the transformers import."
+                 _pf_fail=1 ;;
+        *)       echo "  hemopi2:    $(command -v hemopi2_classification)  (magainin-2 -> $_pf_hemo)" ;;
+    esac
 elif [ "${PFES_SKIP_HEMO:-0}" = "1" ]; then
     echo "  hemopi2:    not found, but PFES_SKIP_HEMO=1 — hemo_prob will be 0.0"
 else

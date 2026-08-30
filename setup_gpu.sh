@@ -123,7 +123,14 @@ esac
 say "torch (CUDA build)"
 # Not --quiet: this is a ~3 GB download and the longest step in the script.
 # Silence here reads as a hang.
-pip install torch --index-url "https://download.pytorch.org/whl/${CU_TAG}" \
+# torchvision comes from the SAME index as torch, deliberately. Nothing here
+# uses it directly, but `pip install hemopi2` pulls transformers, transformers
+# imports torchvision, and torchvision aborts the import if it was built for a
+# different CUDA major version than torch. Installed separately from PyPI it
+# picks the newest CUDA build and mismatches -- on rucker, torch cu128 against
+# torchvision cu130 -- which silently sent every hemo_prob to the biophysical
+# surrogate for a whole run.
+pip install torch torchvision --index-url "https://download.pytorch.org/whl/${CU_TAG}" \
     || die "torch install failed -- try a different CU_TAG, see https://pytorch.org/get-started/locally/"
 python - <<'PY'
 import torch, sys
@@ -152,6 +159,15 @@ say "pipeline dependencies"
 # comes back at -0.050, classified NOT an AMP.
 pip install --quiet -r requirements.txt || die "requirements.txt install failed"
 pip install --quiet hemopi2 || echo "  WARNING: hemopi2 failed; set PFES_SKIP_HEMO=1 or fix before running"
+
+# hemopi2 pulls transformers, which can pull a PyPI torchvision over the CUDA
+# build installed above. Put it back if so.
+if ! python -c "import torch, torchvision, sys; sys.exit(0 if torch.version.cuda.split('.')[0] == torchvision.version.cuda.split('.')[0] else 1)" 2>/dev/null; then
+    echo "  torchvision CUDA major does not match torch — reinstalling from ${CU_TAG}"
+    pip install --quiet --force-reinstall torchvision \
+        --index-url "https://download.pytorch.org/whl/${CU_TAG}" \
+        || die "could not align torchvision with torch"
+fi
 
 say "MACREL"
 # conda-forge before bioconda, per bioconda's own channel-order requirement.

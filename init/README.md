@@ -28,15 +28,22 @@ MACREL already calls an AMP is dropped. Both directories were built with
 |---|---|---|---|
 | `init/init_random.faa` | **0 / 100** | 0.188 | 0.495 |
 | `init/init_fragments.faa` | **0 / 100** | 0.139 | 0.495 |
-| `init/init_orfs.faa` | *not verified* | — | — |
+| `init/init_orfs.faa` | **0 / 100** | 0.202 | 0.495 |
 | `init_varlen/init_random.faa` | **0 / 100** | — | — |
 | `init_varlen/init_fragments.faa` | **0 / 100** | — | — |
 
-> **The sORF arm has never been verified against `macrel_score_batch`.** It was
-> built with the same `--max-amp-prob 0.5`, but the delivered file was not
-> re-scored the way the other two were, so the row above is empty rather than
-> zero. Verify it before the next series — one call, and the arm carrying the
-> most-discussed result should not be the one arm taken on trust:
+> **Verified 2026-08-30.** The sORF arm was re-scored with
+> `score.macrel_score_batch`, the same function the run calls, and comes back
+> **0 / 100 above 0.5, median 0.202, max 0.495** — the same screen signature as
+> the other two. The three delivered sets are therefore all verified against
+> the function that scores them at run time, and the row above is measured
+> rather than assumed.
+>
+> Median probability does differ across the arms — 0.139 fragments, 0.188
+> random, **0.202 sORF** — so small ORFs do start marginally nearer the class
+> than either comparator. That is a property of small ORFs, not of the
+> assembly, and after screening no set contains a sequence MACREL would call an
+> AMP.
 >
 > ```bash
 > python -c "
