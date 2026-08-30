@@ -30,64 +30,36 @@ else
 fi
 
 if command -v hemopi2_classification >/dev/null 2>&1; then
-    # The executable existing is not the same as it working. On rucker it was
-    # installed and on PATH, and every invocation raised at import -- transformers
-    # pulls in torchvision, and a torchvision built for a different CUDA major
-    # version than torch aborts the import. score.py then falls back per sequence
-    # to calculate_hemo_proxy and warns only on stderr, so an entire run logs a
-    # biophysical surrogate in the hemo_prob column while preflight reports the
-    # tool as present. Probe it end to end, the way macrel is probed.
+    # The executable existing is not the same as it working, and this one has
+    # failed in three distinct ways: a torch/torchvision CUDA mismatch aborting
+    # the transformers import, numpy past its pin, and models emitting values
+    # outside [0,1]. In every case score.py falls back per sequence to
+    # calculate_hemo_proxy and warns only on stderr, so a whole run logs a
+    # biophysical surrogate in hemo_prob while the tool reports as present.
+    #
+    # Probe end to end, and check ORDER as well as range: model 4 returns
+    # exactly 0.0 for every sequence, which is inside [0,1], perfectly useless,
+    # and calls melittin non-hemolytic. See score.hemopi2_agrees.
     _pf_hemo=$(python - <<'PY' 2>/dev/null
-import score, sys
-d = score.hemopi2_score_batch(['GIGKFLHSAKKFGKAFVGEIMNS'])   # magainin-2
-v = list(d.values())[0]
-# calculate_hemo_proxy is deterministic; if HemoPI2 did not answer, the value
-# is exactly what the surrogate returns for this sequence.
-print('proxy' if abs(v - score.calculate_hemo_proxy('GIGKFLHSAKKFGKAFVGEIMNS')) < 1e-9
-      else f'{v:.4f}')
+import score
+ok, why = score.hemopi2_agrees()
+print(f"ok|model {score.HEMOPI2_MODEL}, {why}" if ok else f"bad|{why}")
 PY
 )
     case "$_pf_hemo" in
+        ok\|*)   echo "  hemopi2:    ${_pf_hemo#ok|}" ;;
         "")      echo "  hemopi2:    *** CALL FAILED *** $(command -v hemopi2_classification)"
                  _pf_fail=1 ;;
-        proxy)   echo "  hemopi2:    *** INSTALLED BUT NOT WORKING ***"
-                 echo "              it returned the biophysical surrogate, not HemoPI2."
-                 # Name the cause rather than guessing at it. Both known failures
-                 # are import-time and both are version skew in the torch stack.
-                 python - <<'PY' 2>/dev/null | sed 's/^/              /'
-from packaging.version import Version
-try:
-    import numpy
-    if Version(numpy.__version__) >= Version("2"):
-        print(f"cause: numpy {numpy.__version__} against the numpy<2 pin —")
-        print("       HemoPI2's pickled scikit-learn models cannot load.")
-        print("       fix:   pip install 'numpy<2'")
-except Exception:
-    pass
-try:
-    import torch, torchvision
-    if torch.version.cuda.split(".")[0] != torchvision.version.cuda.split(".")[0]:
-        print(f"cause: torch CUDA {torch.version.cuda} against torchvision "
-              f"{torchvision.version.cuda} — the transformers import aborts.")
-        print("       fix:   pip install --force-reinstall --no-deps torchvision \\")
-        print("                  --index-url https://download.pytorch.org/whl/cu128")
-except Exception:
-    pass
-PY
-                 # If neither known cause matched, the block above printed
-                 # nothing, which is worse than useless. Show the real failure.
-                 #
-                 # Do NOT re-invoke the CLI by hand here. hemopi2_classification
-                 # requires -wd/--working, score.py passes it, and an ad-hoc
-                 # invocation that omits it reports its own usage error instead
-                 # of the fault being diagnosed. Capture what score.py itself
-                 # writes when it falls back.
+        *)       echo "  hemopi2:    *** INSTALLED BUT NOT WORKING ***"
+                 echo "              ${_pf_hemo#bad|}"
+                 # If the failure is not one this understands, show what score.py
+                 # itself wrote when it fell back, rather than guessing.
                  python -c "
 import score
 score.hemopi2_score_batch(['GIGKFLHSAKKFGKAFVGEIMNS'])" 2>&1 >/dev/null \
-                     | grep -v '^\s*$' | tail -6 | sed 's/^ *//; s/^/              | /'
+                     | grep -v '^\s*$' | tail -4 | sed 's/^ *//; s/^/              | /'
+                 echo "              try another model:  PFES_HEMO_MODEL=1 ./preflight.sh"
                  _pf_fail=1 ;;
-        *)       echo "  hemopi2:    $(command -v hemopi2_classification)  (magainin-2 -> $_pf_hemo)" ;;
     esac
 elif [ "${PFES_SKIP_HEMO:-0}" = "1" ]; then
     echo "  hemopi2:    not found, but PFES_SKIP_HEMO=1 — hemo_prob will be 0.0"
