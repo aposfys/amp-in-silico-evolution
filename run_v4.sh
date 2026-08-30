@@ -8,9 +8,16 @@
 # comparison tests, and why one replicate per cell is enough for it, is in the
 # top-level README under "The experiment".
 #
+# The three origins run STRICTLY SEQUENTIALLY, one process at a time -- random,
+# then fragments, then orfs -- each starting only after the previous exits.
+# They share one GPU and one CPU budget, so overlapping them would divide the
+# core cap three ways and contend for VRAM.
+#
 # Run the `main` arm first. It is the cheap half (~4-5 h a run against 10-15 h
 # for the control, whose chains grow), and if the machine is taken back it is
 # the half that still yields the primary contrast.
+#
+# CPU cap defaults to 12 cores of the 32 on rucker; PFES_CORES overrides it.
 #
 # The two arms live on different branches, so check the control out beside this
 # one rather than switching back and forth in place:
@@ -85,8 +92,8 @@ echo "env $(basename "$CONDA_PREFIX")  python $(command -v python)"
 # libraries that read them, and this pipeline spawns processes that do not:
 # psique is a subprocess per structure, HemoPI2 is a separate program, and
 # onnxruntime picks its own pool. taskset bounds the whole process tree,
-# children included, so 6 means 6.
-CORES="${PFES_CORES:-6}"
+# children included, so the number below is the number.
+CORES="${PFES_CORES:-12}"
 CPUSET="${PFES_CPUSET:-0-$((CORES-1))}"
 
 export KMP_BLOCKTIME=0
@@ -148,19 +155,41 @@ mkdir -p "$OUT"
              --format=csv,noheader 2>/dev/null | sed 's/^/### gpu: /'
 } >> "$LOG"
 
+# Strictly sequential. Each call blocks until its run exits, so only one
+# pfes.py is ever resident: they share one GPU, and the CPU-side work is capped
+# at $CORES for the series as a whole rather than per run. Overlapping them
+# would divide that cap by three and contend for VRAM -- the v2 series lost a
+# run to 80.7 h against 4.6 h for its siblings, purely from concurrency.
+N_RUNS=3
+run_i=0
+
 run () {           # $1 = init fasta   $2 = run name
     local init="$R/$1" name="$2"
-    echo "=== $(date '+%F %T') START $name" >> "$LOG"
+    run_i=$((run_i + 1))
+    local t0=$(date +%s)
+    printf '\n[%d/%d] %s  started %s\n' "$run_i" "$N_RUNS" "$name" "$(date '+%F %T')"
+    echo "=== $(date '+%F %T') START $name ($run_i/$N_RUNS)" >> "$LOG"
+
     $TASKSET python "$R/pfes.py" --start file --start-file "$init" \
         $COMMON -o "$OUT/$name" \
         > "$OUT/$name.console.log" 2>&1
     local rc=$?
-    echo "=== $(date '+%F %T') END   $name (exit $rc)" >> "$LOG"
+
+    local el=$(( $(date +%s) - t0 ))
+    printf '[%d/%d] %s  %s after %dh%02dm  (exit %d)\n' \
+        "$run_i" "$N_RUNS" "$name" \
+        "$([ $rc -eq 0 ] && echo finished || echo FAILED)" \
+        $((el/3600)) $(((el%3600)/60)) "$rc"
+    echo "=== $(date '+%F %T') END   $name (exit $rc, ${el}s)" >> "$LOG"
+
     # A run that fell back to the surrogate is not a result. Say so at the end
     # of the run rather than at the end of the analysis, six runs later.
     if grep -qi 'macrel not installed\|falling back' "$OUT/$name.console.log"; then
         echo "*** $name FELL BACK TO A SURROGATE — discard it ***" | tee -a "$LOG"
     fi
+    # Carry on rather than abandoning the series: the remaining origins are
+    # independent, and one failure should not cost a night of the other two.
+    [ $rc -eq 0 ] || echo "    continuing to the next origin; $name needs re-running" >&2
 }
 
 run init/init_random.faa     random
