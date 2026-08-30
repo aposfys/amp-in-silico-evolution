@@ -74,7 +74,14 @@ try:
 except Exception:
     pass
 PY
-                 echo "              full error:  hemopi2_classification --help"
+                 # If neither known cause matched, the block above printed
+                 # nothing, which is worse than useless. Run the tool for real
+                 # and show what it says.
+                 _pf_fa=$(mktemp /tmp/pf_hemo_XXXX.fa)
+                 printf '>magainin2\nGIGKFLHSAKKFGKAFVGEIMNS\n' > "$_pf_fa"
+                 hemopi2_classification -i "$_pf_fa" -o "${_pf_fa%.fa}.csv" -m 1 2>&1 \
+                     | grep -vE '^\s*File "|^\s*$' | tail -4 | sed 's/^/              | /'
+                 rm -f "$_pf_fa" "${_pf_fa%.fa}.csv"
                  _pf_fail=1 ;;
         *)       echo "  hemopi2:    $(command -v hemopi2_classification)  (magainin-2 -> $_pf_hemo)" ;;
     esac
