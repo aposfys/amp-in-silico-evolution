@@ -75,13 +75,17 @@ except Exception:
     pass
 PY
                  # If neither known cause matched, the block above printed
-                 # nothing, which is worse than useless. Run the tool for real
-                 # and show what it says.
-                 _pf_fa=$(mktemp /tmp/pf_hemo_XXXX.fa)
-                 printf '>magainin2\nGIGKFLHSAKKFGKAFVGEIMNS\n' > "$_pf_fa"
-                 hemopi2_classification -i "$_pf_fa" -o "${_pf_fa%.fa}.csv" -m 1 2>&1 \
-                     | grep -vE '^\s*File "|^\s*$' | tail -4 | sed 's/^/              | /'
-                 rm -f "$_pf_fa" "${_pf_fa%.fa}.csv"
+                 # nothing, which is worse than useless. Show the real failure.
+                 #
+                 # Do NOT re-invoke the CLI by hand here. hemopi2_classification
+                 # requires -wd/--working, score.py passes it, and an ad-hoc
+                 # invocation that omits it reports its own usage error instead
+                 # of the fault being diagnosed. Capture what score.py itself
+                 # writes when it falls back.
+                 python -c "
+import score
+score.hemopi2_score_batch(['GIGKFLHSAKKFGKAFVGEIMNS'])" 2>&1 >/dev/null \
+                     | grep -v '^\s*$' | tail -6 | sed 's/^ *//; s/^/              | /'
                  _pf_fail=1 ;;
         *)       echo "  hemopi2:    $(command -v hemopi2_classification)  (magainin-2 -> $_pf_hemo)" ;;
     esac
