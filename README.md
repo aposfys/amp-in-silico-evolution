@@ -27,8 +27,8 @@ python pfes-alpha/pfes.py  -ng 100 -ps 50 -sm weak -em single_chain -iseq AAAAAA
 
 ```
 <p align="center">
-  <img src="examples/example2.gif" width="350" height="350"/>
-  <img src="examples/Summary.png" width="350" height="350"/>
+  <img src="https://raw.githubusercontent.com/sahakyanhk/PFES/master/examples/example2.gif" width="350" height="350"/>
+  <img src="https://raw.githubusercontent.com/sahakyanhk/PFES/master/examples/Summary.png" width="350" height="350"/>
 </p>
 
 ### Extended data
