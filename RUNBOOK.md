@@ -41,7 +41,7 @@ and the difference is not the GPU alone:
 Every earlier cost estimate in this file has been deleted rather than corrected.
 Three were badly wrong and one was wrong in a way worth remembering: a term of
 **~0.22 s per candidate** was attributed to unexplained CPU work and used to
-argue a GPU could not help. It does not exist. `profile_generation.py` on this
+argue a GPU could not help. It does not exist. Profiling on this
 host puts the non-folding per-candidate work at **6.4 ms**, and its top entries
 are entirely torch and ESM3 operations — no subprocess, no poll, no pandas. The
 0.22 s was contention on a shared 48-core node, measured by subtraction and
@@ -161,11 +161,12 @@ objective into evidence. It has not yet been run against the v4 series.
 
 ## What is archived
 
-`runs-v4/` holds one compressed archive per run: `progress.log`, the console log
-with the exact invocation, and the final generation's structures. The 60,000
-intermediate structures per run are **not** included — 237 MB each, 1.4 GB for a
-series, re-derivable from the sequences in `progress.log`, and needed for no
-figure or table.
+One compressed archive per run is kept by the author: `progress.log`, the
+console log with the exact invocation, and the final generation's structures.
+These are **not published in this repository** and are available on request —
+apostolosfysekidis1@gmail.com. The 60,000 intermediate structures per run are
+not kept at all — 237 MB each, 1.4 GB for a series, re-derivable from the
+sequences in `progress.log`, and needed for no figure or table.
 
 Runs are not individually reproducible: neither this fork nor upstream PFES
 seeds any RNG. The starting population is fixed by file and recorded by

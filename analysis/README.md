@@ -51,17 +51,7 @@ python visual_pfes.py -l results/<run>/progress.log \
 those columns to the log.
 
 Drop `--notraj` to also write the superposed backbone trajectory (needs
-MDAnalysis). That trajectory is the input to the movie script below.
-
-### `pymol_vstraj.py` — trajectory movie
-
-Renders every *n*th structure with PyMOL and concatenates the frames into a
-video, which is how the upstream paper produced its supplementary movies.
-Requires `pymol` and `moviepy`, neither of which is in `requirements.txt`.
-
-```bash
-python pymol_vstraj.py results/<run>/structures
-```
+MDAnalysis).
 
 ## Written for this thesis
 

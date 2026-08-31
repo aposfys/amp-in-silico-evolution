@@ -5,11 +5,18 @@ question they answer is whether antimicrobial activity emerges as readily from
 sequence with no evolutionary history, from novel protein-coding sequence, or
 from sequence that already encodes something else.
 
+> **The sequence files themselves are not published in this repository.** What
+> follows documents exactly how the three sets were built, screened and
+> verified, and `analysis/make_init_sets.py` is the code that builds them. The
+> delivered sets used for the reported runs are available from the author —
+> apostolosfysekidis1@gmail.com. They are held back so that anyone reproducing
+> the published results makes contact first.
+
 | File | Origin | Status |
 |---|---|---|
-| `init_random.faa` | completely random, uniform over the 20 residues | ready, screened |
-| `init_orfs.faa` | small ORFs from metazoan transcriptomes | ready, screened |
-| `init_fragments.faa` | fragments of conserved metazoan proteins that are not AMPs | ready, screened |
+| `init_random.faa` | completely random, uniform over the 20 residues | on request |
+| `init_orfs.faa` | small ORFs from metazoan transcriptomes | on request |
+| `init_fragments.faa` | fragments of conserved metazoan proteins that are not AMPs | on request |
 
 Each is fed to a run as a fixed starting population:
 
