@@ -88,10 +88,10 @@ selected on.
 removed: v1 optimised a different fitness function, v2 completed with neither
 classifier installed, and v3 ran the contact term that counted α-helical
 turns. [`VOID-RUNS.md`](VOID-RUNS.md) records what each series was, what was
-wrong with it, and how to recover those archives from git history. The v4
-archives and the starting populations are held by the author and available on
-request; [`init/`](init/) and [`init_varlen/`](init_varlen/) document how the
-populations were built and screened.
+wrong with it. Those archives, the v4 archives and the starting populations are
+all held by the author and available on request; [`init/`](init/) and
+[`init_varlen/`](init_varlen/) document how the populations were built and
+screened.
 
 ## The experiment
 
@@ -207,7 +207,7 @@ register, so a long helix cannot score as a compact fold. Upstream PFES loops
 those helical contacts; its 6 Å cutoff mostly hides this, but a wider cutoff
 un-hides it. Measured on this project's own output at 8 Å, **95–98 % of counted
 contacts were |i − j| = 4** — the term was counting helical turns. Corrected in
-`0d06bb8`.
+`dca8d82`.
 
 A single α-helix has no tertiary contacts, so the corrected term sits near
 **1.0** for 25–30 aa peptides and rises only for genuinely globular ones

@@ -4,9 +4,9 @@ There is no results directory in this repository, and this file is why. All
 previous production output has been removed. The record of what was run, and of
 what was wrong with it, is kept here because the failures are the reusable part.
 
-The deleted archives remain in git history at commit `0942520` and can be
-recovered with `git show 0942520:production/runs/<name>.tar.gz > <name>.tar.gz`,
-so every measurement below is still checkable.
+The deleted archives are held by the author and available on request —
+apostolosfysekidis1@gmail.com — so every measurement below remains checkable.
+They are not in this repository or its history.
 
 ## What was deleted
 
@@ -55,7 +55,7 @@ magainin-2 end to end and refuses to start if the surrogate answers.
 
 Eight runs with both classifiers live. Three defects were found afterwards by
 auditing the code against Sahakyan et al. 2025 and its SI Appendix
-(`0d06bb8`, `9c0ba93`):
+(`dca8d82`, `e544cd0`):
 
 - `get_nconts` counted the α-helical contacts Eq. 5 excludes. Measured on this
   project's own output at 8 Å, **95–98 % of counted contacts were |i − j| = 4** —

@@ -62,7 +62,7 @@ MACREL already calls an AMP is dropped. Both directories were built with
 >
 > Two files this document refers to do not exist: `init_orfs.tsv` (the
 > per-fragment provenance record) and `init_orfs.draw1_prescreen.faa`. The
-> `--orfs` provenance TSV was added in `cd673f6`, after these sets were built.
+> `--orfs` provenance TSV was added in `76801a8`, after these sets were built.
 > **Do not regenerate the set to produce them** — screening changes which draws
 > are accepted and therefore the whole RNG stream, so `make_init_sets.py` would
 > return a different set of 100 and invalidate every run seeded from this file.

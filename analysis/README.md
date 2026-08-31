@@ -16,7 +16,7 @@ criterion, not the weak selection the flag names.
 > `(1 − hemo_proxy)`. Hemolysis has not been in the score since; it is an
 > attribute, and putting a safety term in the objective is the thing this design
 > deliberately does not do. Recover them from git history if the layout is ever
-> useful: `git show fba3369:analysis/make_word.py`.
+> useful: `git show 4f3d68f:analysis/make_word.py`.
 
 ## Inherited from upstream PFES
 

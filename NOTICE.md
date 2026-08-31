@@ -33,10 +33,9 @@ not bundled and must be installed separately if used.
 **Removed:** `bin/iqtree2` and `bin/muscle5` were inherited from upstream, were
 not referenced anywhere in this repository, and are distributed under
 GPL-family licences that the Unlicense this repository previously carried had
-no authority to override. They were deleted rather than re-licensed. Recover
-them from git history if a phylogenetics or alignment step is ever added —
-`git show 1d4f2a8:bin/iqtree2` — but obtain them from upstream with their own
-licences instead.
+no authority to override. They were deleted rather than re-licensed, and are
+not recoverable from this repository's history. If a phylogenetics or alignment
+step is ever added, obtain them from upstream with their own licences.
 
 ## Models the pipeline fetches at runtime
 
@@ -79,7 +78,7 @@ upstream work it builds on. Six files are forked from PFES and still carry
 substantial upstream code — `pfes.py`, `score.py`, `evolution.py`,
 `visual_pfes.py`, `psique.py`, `bin/dssp.sh`. Across the
 core simulator files the commit history is 65 commits by Harutyun Sahakyan
-against 59 by Apostolos Fysekidis. Those files are derivative works: the
+against 62 by Apostolos Fysekidis. Those files are derivative works: the
 modifications are this project's, the material they modify is nobody's.
 
 **Everything else in the repository is original**, including the objective and
