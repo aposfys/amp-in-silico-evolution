@@ -14,6 +14,18 @@ objective or is simply what ESM3 fold confidence rewards on its own. See
 
 Built on top of [PFES](https://github.com/sahakyanhk/pfes) by Sahakyan et al.
 
+## Before you run this
+
+This code accompanies an MSc thesis. **If you intend to run it, please contact me
+first** — apostolosfysekidis1@gmail.com. I would like to know who is using it.
+
+The run outputs and the exact input populations behind the reported results are
+**not published here**. They are available from me on request. Without them you can
+read and adapt the method, but you will not reproduce the figures in the thesis.
+
+This repository is MIT licensed, so the licence does not oblige you to make contact.
+The above is a request, not a condition.
+
 ## The objective
 
 `main` **is** the production arm. Its fitness is:
@@ -76,9 +88,10 @@ selected on.
 removed: v1 optimised a different fitness function, v2 completed with neither
 classifier installed, and v3 ran the contact term that counted α-helical
 turns. [`VOID-RUNS.md`](VOID-RUNS.md) records what each series was, what was
-wrong with it, and how to recover the archives from git history. The starting
-populations are unaffected and live in [`init/`](init/) and
-[`init_varlen/`](init_varlen/).
+wrong with it, and how to recover those archives from git history. The v4
+archives and the starting populations are held by the author and available on
+request; [`init/`](init/) and [`init_varlen/`](init_varlen/) document how the
+populations were built and screened.
 
 ## The experiment
 
@@ -259,8 +272,9 @@ export HF_TOKEN=...      # huggingface.co/EvolutionaryScale/esm3-sm-open-v1
 `requirements.txt` pins `onnxruntime<=1.25.1`: 1.26 changed the shape of ONNX
 `output_probability`, so MACREL returned raw decision values instead of
 calibrated probabilities — magainin-2 came back at **−0.050**, classified NOT an
-AMP, sending every candidate to the surrogate. `psique` is bundled
-(`bin/psique`); no install needed.
+AMP, sending every candidate to the surrogate. `psique` is **not shipped here**
+— build it from https://github.com/fadasme/psique and put it at `bin/psique`
+before running `preflight.sh`. See [`NOTICE.md`](NOTICE.md).
 
 ## Run
 
@@ -306,15 +320,16 @@ only condition.
 
 It is a fork, so the claim is bounded. Upstream [PFES](https://github.com/sahakyanhk/pfes)
 is public domain under the Unlicense, which places no conditions on derivative
-works — seven files here still carry substantial upstream code and remain
+works — six files here still carry substantial upstream code and remain
 derivative works of public-domain material, and PFES itself can always be taken
-from upstream unencumbered. The bundled `psique` binary is MIT by Francisco
-Adasme and carries its own notice at [`bin/LICENSE.psique`](bin/LICENSE.psique),
-as MIT requires. The ESM3 weights are gated and governed by the terms you accept
-on HuggingFace, not by this licence.
+from upstream unencumbered. `psique` is MIT by Francisco Adasme and is not
+redistributed here; fetch it from
+[its own repository](https://github.com/fadasme/psique), which carries the
+notice MIT requires. The ESM3 weights are gated and governed by the terms you
+accept on HuggingFace, not by this licence.
 
 [`NOTICE.md`](NOTICE.md) has the full breakdown: what is forked, what is
-original, and every component the pipeline bundles or fetches.
+original, and every component the pipeline requires or fetches.
 
 This repository previously carried the Unlicense, inherited from upstream PFES
 when it was forked. That was never a deliberate choice here, and it made two

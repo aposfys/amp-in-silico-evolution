@@ -9,15 +9,18 @@ lives in this file. The pipeline bundles one binary and depends on several
 models and tools, each under its own terms, and a permissive licence on this
 repository does not extend to any of them.
 
-## Bundled in this repository
+## Required, but not distributed here
 
-| Component | Licence | Notice |
+| Component | Licence | Source |
 |---|---|---|
-| `bin/psique` | MIT, © 2023 Francisco Adasme | [`bin/LICENSE.psique`](bin/LICENSE.psique) |
+| `psique` | MIT, © 2023 Francisco Adasme | https://github.com/fadasme/psique |
 
 `psique` assigns secondary structure and is called once per predicted structure
-by `pfes.py`. MIT requires the copyright and permission notice to accompany
-every copy, so it is kept beside the binary rather than only referenced here.
+by `pfes.py`. The compiled binary is **not redistributed in this repository** —
+it is a Linux x86-64 executable, and shipping third-party binaries in a source
+repository serves nobody. Build or download it from the source above and place
+it at `bin/psique`. `setup_gpu.sh` expects it there and `preflight.sh` checks
+for it.
 
 > Adasme-Carreño F., Caballero J. & Ireta J. (2021). PSIQUE: Protein Secondary
 > Structure Identification on the Basis of Quaternions and Electronic Structure
@@ -72,9 +75,9 @@ withdraws it. Anyone may take PFES from its own repository under the Unlicense,
 and the MIT licence on this repository has no bearing on that.
 
 **The MIT copyright claim is over this project's contributions**, not over the
-upstream work it builds on. Seven files are forked from PFES and still carry
+upstream work it builds on. Six files are forked from PFES and still carry
 substantial upstream code — `pfes.py`, `score.py`, `evolution.py`,
-`visual_pfes.py`, `psique.py`, `pymol_vstraj.py`, `bin/dssp.sh`. Across the
+`visual_pfes.py`, `psique.py`, `bin/dssp.sh`. Across the
 core simulator files the commit history is 65 commits by Harutyun Sahakyan
 against 59 by Apostolos Fysekidis. Those files are derivative works: the
 modifications are this project's, the material they modify is nobody's.

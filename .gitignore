@@ -447,3 +447,16 @@ pfes-runs/
 # macOS Finder metadata
 .DS_Store
 **/.DS_Store
+
+# Run outputs and superseded series — available from the author on request
+runs-v4/
+pfes-results/
+__pycache__/
+
+# Starting populations and caches — rebuild with analysis/make_init_sets.py, or ask the author
+init/*.faa
+init/*.tsv
+init_varlen/*.faa
+init_varlen/*.tsv
+*/.cache/
+bin/psique
