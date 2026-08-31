@@ -5,11 +5,18 @@ question they answer is whether antimicrobial activity emerges as readily from
 sequence with no evolutionary history, from novel protein-coding sequence, or
 from sequence that already encodes something else.
 
+> **The sequence files themselves are not published in this repository.** What
+> follows documents exactly how the three sets were built, screened and
+> verified, and `analysis/make_init_sets.py` is the code that builds them. The
+> delivered sets used for the reported runs are available from the author —
+> apostolosfysekidis1@gmail.com. They are held back so that anyone reproducing
+> the published results makes contact first.
+
 | File | Origin | Status |
 |---|---|---|
-| `init_random.faa` | completely random, uniform over the 20 residues | ready, screened |
-| `init_orfs.faa` | small ORFs from metazoan transcriptomes | ready, screened |
-| `init_fragments.faa` | fragments of conserved metazoan proteins that are not AMPs | ready, screened |
+| `init_random.faa` | completely random, uniform over the 20 residues | on request |
+| `init_orfs.faa` | small ORFs from metazoan transcriptomes | on request |
+| `init_fragments.faa` | fragments of conserved metazoan proteins that are not AMPs | on request |
 
 Each is fed to a run as a fixed starting population:
 
@@ -55,7 +62,7 @@ MACREL already calls an AMP is dropped. Both directories were built with
 >
 > Two files this document refers to do not exist: `init_orfs.tsv` (the
 > per-fragment provenance record) and `init_orfs.draw1_prescreen.faa`. The
-> `--orfs` provenance TSV was added in `cd673f6`, after these sets were built.
+> `--orfs` provenance TSV was added in `76801a8`, after these sets were built.
 > **Do not regenerate the set to produce them** — screening changes which draws
 > are accepted and therefore the whole RNG stream, so `make_init_sets.py` would
 > return a different set of 100 and invalidate every run seeded from this file.

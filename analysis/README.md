@@ -16,7 +16,7 @@ criterion, not the weak selection the flag names.
 > `(1 − hemo_proxy)`. Hemolysis has not been in the score since; it is an
 > attribute, and putting a safety term in the objective is the thing this design
 > deliberately does not do. Recover them from git history if the layout is ever
-> useful: `git show fba3369:analysis/make_word.py`.
+> useful: `git show 4f3d68f:analysis/make_word.py`.
 
 ## Inherited from upstream PFES
 
@@ -51,17 +51,7 @@ python visual_pfes.py -l results/<run>/progress.log \
 those columns to the log.
 
 Drop `--notraj` to also write the superposed backbone trajectory (needs
-MDAnalysis). That trajectory is the input to the movie script below.
-
-### `pymol_vstraj.py` — trajectory movie
-
-Renders every *n*th structure with PyMOL and concatenates the frames into a
-video, which is how the upstream paper produced its supplementary movies.
-Requires `pymol` and `moviepy`, neither of which is in `requirements.txt`.
-
-```bash
-python pymol_vstraj.py results/<run>/structures
-```
+MDAnalysis).
 
 ## Written for this thesis
 

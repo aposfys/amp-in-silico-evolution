@@ -9,8 +9,8 @@ of validity.
 
 Measured on `sorf-r1` and `sorf-r2`, the only two runs of the previous series
 that had MACREL and HemoPI2 genuinely installed. Those runs have since been
-deleted along with the rest ([`VOID-RUNS.md`](VOID-RUNS.md)); they are
-recoverable from git history at `0942520`, and the numbers below are what they
+deleted along with the rest ([`VOID-RUNS.md`](VOID-RUNS.md)); their archives
+are available from the author on request, and the numbers below are what they
 measured. Spread is log₁₀(max/min) across the 100 members of a generation — a
 pure number comparable across terms, because the fitness is a product, so
 `log(score) = Σ log(terms)` and these are additive contributions to the quantity
@@ -184,7 +184,7 @@ because it is the published definition, not because it does anything.
 Eq. 5 as published: **Cβ atoms, within 6 Å, more than 5 residues apart**. The
 `|i − j| > 5` rule excludes the i→i+4 α-helical register; the previous
 implementation admitted it, and 95–98 % of counted contacts were helical turns
-(`0d06bb8`). Corrected, the term contributes 0.007 against 0.037 before.
+(`dca8d82`). Corrected, the term contributes 0.007 against 0.037 before.
 
 That is the right answer, and the reason is biological. Contact density
 measures tertiary packing — the defining property of the globular domains PFES

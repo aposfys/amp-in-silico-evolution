@@ -4,6 +4,13 @@ The same two sets as `init/`, from the same code, the same sampling frame and th
 same seed, cut at a **random length as well as a random position**: uniform over
 10–100 aa, the range MACREL is defined for.
 
+> **The sequence files themselves are not published in this repository.** What
+> follows documents exactly how the three sets were built, screened and
+> verified, and `analysis/make_init_sets.py` is the code that builds them. The
+> delivered sets used for the reported runs are available from the author —
+> apostolosfysekidis1@gmail.com. They are held back so that anyone reproducing
+> the published results makes contact first.
+
 ```bash
 python analysis/make_init_sets.py --uniprot --pop 100 --len 10-100 --seed 42 --no-screen -o init_varlen/
 python analysis/make_init_sets.py --random  --pop 100 --len 10-100 --seed 42 --no-screen -o init_varlen/
