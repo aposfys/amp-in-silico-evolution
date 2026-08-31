@@ -1,4 +1,10 @@
 Please use [AMES](https://github.com/sahakyanhk/ames). It is an updated version of PFES that supports more simulations.
+
+> **This branch is upstream [PFES](https://github.com/sahakyanhk/pfes), kept
+> unmodified as the fork point.** Nothing here is my work and the contact request
+> on `main` does not apply to it. For the antimicrobial peptide work built on top
+> of this, switch to `main`. Upstream PFES is public domain under the Unlicense.
+
 #
 
 # PFES: protein fold evolution simulation
