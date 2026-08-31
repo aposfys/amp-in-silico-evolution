@@ -1,97 +1,89 @@
-# amp-in-silico-evolution — `control-fold-only`
+# amp-in-silico-evolution
 
-**The control arm.** Selection is driven by nothing but the two numbers ESM3
-emits. No structural penalties, no secondary structure, no activity classifier.
+**In silico evolution of antimicrobial peptides.** ESM3 folds each candidate,
+MACREL scores it for antimicrobial activity, and the PFES structural terms
+constrain length and secondary structure. HemoPI2 records hemolysis and AMPlify
+re-scores survivors, both as attributes that never touch selection, so they
+report on the search rather than restate it. A population of one hundred
+peptides is mutated and selected for six hundred generations.
 
-```
-score = mean_pLDDT × pTM
-```
+The reported work is a controlled ablation: **three starting populations × two
+objectives**, testing whether the AMP character of the winners is caused by the
+objective or is simply what ESM3 fold confidence rewards on its own.
 
-Paired against [`main`](../../tree/main), the production arm, which is
-this plus the full PFES structural objective and MACREL, it isolates what all of
-that machinery actually contributes. Run it with the same `--start-file` as the
-production branch and the difference is attributable to the objective alone.
+Built on [PFES](https://github.com/sahakyanhk/pfes) by Sahakyan et al.
 
-## What is logged but does not select
+> **You are on `control-fold-only`.** This branch is `main` with one change:
+> selection is driven by ESM3 fold confidence alone (mean pLDDT × pTM), with no
+> structural terms and no MACREL. Every other quantity is still computed and
+> logged as an attribute, so this branch's `progress.log` has the same schema as
+> `main`'s and the two are directly comparable. It is the control arm of the
+> ablation. For the experiment itself, see `main`.
 
-Everything else is still computed and written to `progress.log`, so this branch's
-log has the **same schema** as the production branch's and the two are directly
-comparable:
+## Before you run this
 
-| Attribute | Source | Note |
-|---|---|---|
-| `prot_len_penalty`, `max_alpha_penalty`, `max_beta_penalty` | PFES / PSIQUE | computed, not in score |
-| `num_conts` | Eq. 5 contacts (Cβ, 6 Å, \|i−j\| > 5) | computed, not in score |
-| `amp_prob` | MACREL | **computed, not in score** |
-| `hemo_prob` | HemoPI2 | computed, not in score |
+This code accompanies an MSc thesis. **If you intend to run it, please contact me
+first** — apostolosfysekidis1@gmail.com. I would like to know who is using it.
 
-Keeping `amp_prob` is the point of the arm. The question it answers — *what does
-fold confidence alone select for, and are those peptides antimicrobial?* — can
-only be read off if MACREL scores peptides it never drove. Set
-`PFES_SKIP_HEMO=1` to drop the per-generation HemoPI2 call if you don't want the
-hemolysis attribute at that price.
+The run outputs and the exact input populations behind the reported results are
+**not published here**. They are available from me on request. Without them you
+can read and adapt the method, but you will not reproduce the figures in the
+thesis.
 
-## Known behaviour: chains grow
+This repository is MIT licensed, so the licence does not oblige you to make
+contact. The above is a request, not a condition.
 
-There is no length penalty here, and fold confidence rises with chain length, so
-the population drifts well past the 30 aa AMP window. Two consequences:
+## Where to look
 
-- **`amp_prob` becomes unreliable above 100 aa.** MACREL is defined for 10–100
-  residues; outside that window `macrel_score_batch` substitutes the biophysical
-  `calculate_samp` proxy per sequence. Selection is unaffected (MACREL is not in
-  the score), but the *attribute you are analysing* silently changes identity.
-  The run warns on stderr when this happens — read those warnings before
-  interpreting `amp_prob` from a long run.
-- **Folding cost rises with length**, so this arm is slower per candidate than
-  the production branch despite the simpler score.
+| | |
+|---|---|
+| [`OBJECTIVE.md`](OBJECTIVE.md) | The fitness function, term by term, with every constant traced to its source and the selection pressure each term actually applies |
+| [`RESULTS.md`](RESULTS.md) | Series v4, the objective ablation: six runs, what they found |
+| [`RUNBOOK.md`](RUNBOOK.md) | How to run a series and what it costs, measured on the production host |
+| [`VOID-RUNS.md`](VOID-RUNS.md) | Every series before v4, what was wrong with each, and why they were discarded |
+| [`init/README.md`](init/README.md) | How the three starting populations were built and screened |
+| [`analysis/README.md`](analysis/README.md) | The figure and report scripts |
+| [`NOTICE.md`](NOTICE.md) | What is forked, what is original, and every component the pipeline requires |
 
-Cap length with `-pl0` if you want the comparison held at a fixed size, but note
-that reintroduces a term this arm exists to exclude.
+## The experiment
 
-## Run
+Six runs: three starting populations (random sequence, fragments of conserved
+metazoan proteins, small ORFs) crossed with two objectives (the full fitness,
+and fold confidence alone). Population 100, 600 generations, strong selection
+from generation 480. Identical seeds across arms.
 
-```bash
-python pfes.py \
-  --start file --start-file init/init_random.faa \
-  -ps 100 -ng 600 -sm weak -b 32 \
-  --strong_selection_after_n_gen 480 \
-  --norepeat --max-tokens-per-batch 4096 \
-  -o results/esm3-random-r1 2>&1 | tee results/esm3-random-r1.console.log
-```
+The full objective holds chains at 26 residues with `amp_prob` near 0.99 and pTM
+near 0.56. Fold confidence alone lets chains grow to 57–65 residues and reaches
+pTM near 0.84 while `amp_prob` collapses below 0.12. The origin of the starting
+population changes almost nothing. Numbers and interpretation in
+[`RESULTS.md`](RESULTS.md).
 
-**Use `-b 32`, not `-b 20`.** Boltzmann selection depends on `β(sᵢ − s_max)`, so
-the selective pressure scales with the spread of the score. This arm's scores
-run lower than the production branch's (no contact term, no penalties), and β
-must rise to keep the pressure comparable. Matching β across arms without
-matching score scale makes the comparison meaningless.
+Runs are not individually reproducible: neither this fork nor upstream PFES
+seeds any RNG. The starting population is fixed by file and recorded by checksum
+in every run banner. The evidence this design admits is replication across
+independent runs.
 
-## Everything else
+## Install and run
 
-Install, starting populations, analysis and the post-hoc AMPlify audit are
-identical to the production branch — see
-[`main`](../../tree/main).
-
-## Kept in step with `main`
-
-This arm exists to differ from the production arm in **one** respect: the
-objective. Everything else — the scorers, their versions, the guards, the
-starting populations — must be identical, or a difference between the arms is
-not attributable to the objective at all. That is not hypothetical: the previous
-series compared four runs scored by a biophysical surrogate against two scored
-by MACREL and reported the difference as an origin effect
-([`VOID-RUNS.md`](VOID-RUNS.md)).
-
-So this branch is **merged from `main`**, never cherry-picked. The only content
-that is deliberately its own is the `score = np.prod([mean_plddt, ptm])` block
-in `pfes.py`, the startup banner that reports it, and this README. Before
-launching, confirm the two arms agree on what they are scoring with:
+`psique` is **not shipped here** — build it from
+[its repository](https://github.com/fadasme/psique) and place it at
+`bin/psique`. `requirements.txt` pins `onnxruntime<=1.25.1`; 1.26 changed the
+shape of ONNX `output_probability` and MACREL silently returns raw decision
+values instead of calibrated probabilities.
 
 ```bash
-git log --oneline -1 main control-fold-only
-python -c "import score; print('hemo model', score.HEMOPI2_MODEL)"   # must match main
-./preflight.sh                                                       # must pass identically
+./setup_gpu.sh          # builds the environment on a CUDA node
+./preflight.sh          # must pass before any run
+./run_v4.sh             # the reported series
 ```
 
-`run_v4.sh ctrl` refuses to start unless this checkout is on
-`control-fold-only`, so it cannot silently run the production objective under
-the control's name.
+`preflight.sh` aborts before a run starts if the scoring tools are not answering
+correctly. Do not skip it. Full procedure and measured costs in
+[`RUNBOOK.md`](RUNBOOK.md).
+
+## Licence
+
+MIT, © 2026 Apostolos Fysekidis, over this project's contributions only. This is
+a fork of [PFES](https://github.com/sahakyanhk/pfes), which is public domain
+under the Unlicense. ESM3 weights are gated and governed by the terms you accept
+on HuggingFace. See [`NOTICE.md`](NOTICE.md) for the full breakdown.

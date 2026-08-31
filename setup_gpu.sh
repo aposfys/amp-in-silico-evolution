@@ -250,6 +250,5 @@ say "preflight"
 
 say "next"
 echo "  ./gpu_inventory.sh                     # confirms --max-tokens-per-batch"
-echo "  python profile_generation.py -ps 32 -ng 6"
 echo "  python pfes.py --start file --start-file init/init_random.faa \\"
 echo "      -ps 8 -ng 3 -sm weak -b 20 --norepeat -o /tmp/smoke   # expect: ready [cuda]"
